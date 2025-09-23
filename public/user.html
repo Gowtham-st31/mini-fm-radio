@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>User - Mini FM</title>
+<style>
+body{font-family:Arial;text-align:center;padding:50px;background:linear-gradient(to right,#36d1dc,#5b86e5);color:#fff;}
+h1{margin-bottom:30px;}
+audio{margin-top:20px;width:80%;border-radius:10px;}
+</style>
+</head>
+<body>
+<h1>🎧 Listen Live</h1>
+<audio id="player" controls autoplay></audio>
+
+<script>
+const player=document.getElementById("player");
+const ws=new WebSocket("ws://"+location.host);
+const id=Math.random().toString(36).substring(2,9);
+
+ws.onopen = ()=> ws.send(JSON.stringify({type:"watcher",id}));
+
+ws.onmessage = async msg=>{
+    const data=JSON.parse(msg.data);
+    let pc;
+    switch(data.type){
+        case "offer":
+            pc=new RTCPeerConnection();
+            pc.ontrack = e=> player.srcObject = e.streams[0];
+            pc.onicecandidate = e=>{ if(e.candidate) ws.send(JSON.stringify({type:"candidate",candidate:e.candidate,id,target:data.id})); };
+            await pc.setRemoteDescription(data.sdp);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            ws.send(JSON.stringify({type:"answer",sdp:answer,id,target:data.id}));
+            break;
+        case "candidate":
+            if(pc) await pc.addIceCandidate(data.candidate);
+            break;
+    }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Admin - Mini FM</title>
+<style>
+body { font-family: Arial; text-align:center; padding:50px; background: linear-gradient(to right,#ff512f,#dd2476); color:#fff;}
+h1{margin-bottom:30px;font-size:48px;text-shadow:2px 2px #000;}
+button{padding:15px 30px;margin:10px;font-size:18px;border:none;border-radius:10px;cursor:pointer;transition:0.3s;}
+#radioOn{background:#00c6ff;color:#000;}
+#radioOn:hover{background:#0072ff;color:#fff;}
+#radioOff{background:#f00000;color:#fff;}
+#radioOff:hover{background:#ff4b4b;}
+#micToggle{background:#ffff00;color:#000;}
+#micToggle:hover{background:#ffd700;}
+#playSong{background:#00ff00;color:#000;}
+#playSong:hover{background:#00cc00;color:#fff;}
+#stopSong{background:#ff00ff;color:#fff;}
+#stopSong:hover{background:#cc00cc;}
+audio{margin-top:20px;width:80%;border-radius:10px;}
+</style>
+</head>
+<body>
+<h1>🎙️ Admin Radio</h1>
+<button id="radioOn">Radio ON</button>
+<button id="radioOff">Radio OFF</button>
+<button id="micToggle">Mic OFF</button>
+<button id="playSong">Play Song</button>
+<button id="stopSong">Stop Song</button>
+
+<audio id="player" controls autoplay></audio>
+<audio id="songPlayer" src="songs/sample.mp3"></audio>
+
+<script>
+const radioOn = document.getElementById("radioOn");
+const radioOff = document.getElementById("radioOff");
+const micToggle = document.getElementById("micToggle");
+const playSong = document.getElementById("playSong");
+const stopSong = document.getElementById("stopSong");
+const player = document.getElementById("player");
+const songPlayer = document.getElementById("songPlayer");
+
+let localStream;
+let ws;
+let isBroadcasting = false;
+let micOn = true;
+let peers = {};
+
+radioOn.onclick = async () => {
+    if(isBroadcasting) return;
+
+    try{
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        player.srcObject = localStream;
+        isBroadcasting = true;
+
+        ws = new WebSocket("ws://" + location.host);
+
+        ws.onopen = () => ws.send(JSON.stringify({type:"broadcaster"}));
+
+        ws.onmessage = async msg => {
+            const data = JSON.parse(msg.data);
+            switch(data.type){
+                case "watcher":
+                    if(isBroadcasting){
+                        const pc = new RTCPeerConnection();
+                        peers[data.id] = pc;
+
+                        localStream.getTracks().forEach(track=> pc.addTrack(track, localStream));
+
+                        pc.onicecandidate = e=>{ 
+                            if(e.candidate) ws.send(JSON.stringify({type:"candidate",candidate:e.candidate,id:data.id,target:data.id}));
+                        };
+
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        ws.send(JSON.stringify({type:"offer",sdp:offer,id:data.id,target:data.id}));
+                    }
+                    break;
+
+                case "answer":
+                    if(peers[data.id]) await peers[data.id].setRemoteDescription(data.sdp);
+                    break;
+
+                case "candidate":
+                    if(peers[data.id]) await peers[data.id].addIceCandidate(data.candidate);
+                    break;
+            }
+        };
+    } catch(err){
+        alert("Microphone error: "+err.message);
+    }
+};
+
+radioOff.onclick = () => {
+    if(!isBroadcasting) return;
+    localStream.getTracks().forEach(track=>track.stop());
+    player.srcObject = null;
+    songPlayer.pause();
+    isBroadcasting=false;
+    ws.close();
+    peers={};
+    alert("Radio OFF");
+};
+
+micToggle.onclick = () => {
+    if(!localStream) return;
+    micOn = !micOn;
+    localStream.getAudioTracks().forEach(track=> track.enabled = micOn);
+    micToggle.textContent = micOn ? "Mic OFF" : "Mic ON";
+};
+
+playSong.onclick = () => {
+    songPlayer.play();
+    // Replace mic stream with song stream for broadcasting
+    if(localStream && peers){
+        localStream.getAudioTracks().forEach(track=> track.enabled = false); // mute mic
+        const songStream = songPlayer.captureStream();
+        Object.values(peers).forEach(pc=>{
+            songStream.getAudioTracks().forEach(track=>{
+                pc.addTrack(track, songStream);
+            });
+        });
+    }
+};
+
+stopSong.onclick = () => {
+    songPlayer.pause();
+    songPlayer.currentTime = 0;
+    // re-enable mic
+    if(localStream) localStream.getAudioTracks().forEach(track=> track.enabled = micOn);
+};
+</script>
+</body>
+</html>
