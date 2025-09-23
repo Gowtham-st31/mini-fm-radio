@@ -1,23 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>🎶 Mini FM Radio 🎶</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <title>Mini FM Login</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            text-align: center; 
+            padding: 50px; 
+            background: linear-gradient(to right,#ff758c,#ff7eb3); 
+            color:#fff; 
+        }
+        input { 
+            padding: 10px; 
+            font-size: 18px; 
+            margin:10px; 
+            border-radius:5px; 
+            border:none; 
+        }
+        button { 
+            padding:10px 20px; 
+            font-size:18px; 
+            border:none; 
+            border-radius:5px; 
+            cursor:pointer; 
+            background:#fff;
+            color:#ff3c78; 
+        }
+        button:hover { 
+            background:#ff3c78;
+            color:#fff; 
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>📻 Mini FM Radio</h1>
-    <p id="status">🔴 Waiting for live audio...</p>
-    
-    <!-- Buttons for admin -->
-    <button id="startBtn">🎤 Mic ON</button>
-    <button id="stopBtn" disabled>🛑 Mic OFF</button>
-    
-    <!-- Audio player for listeners -->
-    <audio id="player" controls autoplay></audio>
-  </div>
+    <h1>Mini FM Login</h1>
+    <form id="loginForm">
+        <input type="text" id="username" placeholder="Enter name" required><br>
+        <input type="password" id="password" placeholder="Admin password (if admin)"><br>
+        <button type="submit">Login</button>
+    </form>
 
-  <script src="script.js"></script>
+    <script>
+        const form = document.getElementById("loginForm");
+
+        form.addEventListener("submit", e => {
+            e.preventDefault();
+            let username = document.getElementById("username").value.trim();
+            let password = document.getElementById("password").value;
+
+            if(username === "") {
+                alert("Please enter a username!");
+                return;
+            }
+
+            if(username.toLowerCase() === "admin" && password === "admin123") {
+                // Admin login
+                window.location.href = "admin.html";
+            } else {
+                // Normal user login
+                localStorage.setItem("username", username); // store name
+                window.location.href = "user.html";
+            }
+        });
+    </script>
 </body>
 </html>
