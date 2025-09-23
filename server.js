@@ -4,39 +4,33 @@ const WebSocket = require("ws");
 const path = require("path");
 
 const app = express();
-app.use(express.static("public"));
-app.use(express.urlencoded({ extended: true }));
-
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-let broadcaster;
+let clients = [];
 
-wss.on("connection", ws => {
-    ws.on("message", message => {
-        const data = JSON.parse(message);
+wss.on("connection", (ws) => {
+  clients.push(ws);
+  console.log("✅ New user connected");
 
-        switch(data.type) {
-            case "broadcaster":
-                broadcaster = ws;
-                break;
-            case "watcher":
-                if (broadcaster) broadcaster.send(JSON.stringify({ type: "watcher", id: data.id }));
-                break;
-            case "offer":
-            case "answer":
-            case "candidate":
-                const targetClient = [...wss.clients].find(c => c.id === data.target);
-                if(targetClient && targetClient.readyState === WebSocket.OPEN){
-                    targetClient.send(JSON.stringify(data));
-                }
-                break;
-        }
+  ws.on("message", (message) => {
+    // Broadcast admin audio chunks to all users
+    clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
     });
+  });
 
-    ws.on("close", () => {
-        if(ws === broadcaster) broadcaster = null;
-    });
+  ws.on("close", () => {
+    clients = clients.filter((c) => c !== ws);
+    console.log("❌ User disconnected");
+  });
 });
 
-server.listen(3000, () => console.log("Server running on port 3000"));
+app.use(express.static(path.join(__dirname, "public")));
+
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
