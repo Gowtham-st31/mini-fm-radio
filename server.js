@@ -14,12 +14,18 @@ wss.on("connection", (ws) => {
   console.log("✅ New user connected");
 
   ws.on("message", (message) => {
+    console.log(`📡 Received message from client, size: ${message.length} bytes`);
+    
     // Broadcast admin audio chunks to all users
+    let broadcastCount = 0;
     clients.forEach((client) => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         client.send(message);
+        broadcastCount++;
       }
     });
+    
+    console.log(`📢 Broadcasted to ${broadcastCount} clients`);
   });
 
   ws.on("close", () => {
@@ -31,6 +37,11 @@ wss.on("connection", (ws) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log(`✅ Server running on ${HOST}:${PORT}`);
+  console.log(`📡 WebSocket server ready for connections`);
+  console.log(`🌐 Admin panel: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/admin.html`);
+  console.log(`🎧 User interface: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/radio-player.html`);
 });
