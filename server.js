@@ -1,47 +1,30 @@
-const express = require("express");
-const http = require("http");
-const WebSocket = require("ws");
-const path = require("path");
+const WebSocket = require('ws');
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const PORT = 8080;
+const wss = new WebSocket.Server({ port: PORT });
 
 let clients = [];
 
-wss.on("connection", (ws) => {
-  clients.push(ws);
-  console.log("✅ New user connected");
+wss.on('connection', (ws) => {
+  console.log("✅ Client connected");
 
-  ws.on("message", (message) => {
-    console.log(`📡 Received message from client, size: ${message.length} bytes`);
-    
-    // Broadcast admin audio chunks to all users
-    let broadcastCount = 0;
-    clients.forEach((client) => {
+  clients.push(ws);
+
+  ws.on('message', (data) => {
+    // Broadcast to all except sender
+    clients.forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(message);
-        broadcastCount++;
+        client.send(data);
       }
     });
-    
-    console.log(`📢 Broadcasted to ${broadcastCount} clients`);
   });
 
-  ws.on("close", () => {
-    clients = clients.filter((c) => c !== ws);
-    console.log("❌ User disconnected");
+  ws.on('close', () => {
+    console.log("❌ Client disconnected");
+    clients = clients.filter(c => c !== ws);
   });
+
+  ws.send("Connected to server");
 });
 
-app.use(express.static(path.join(__dirname, "public")));
-
-const PORT = process.env.PORT || 10000;
-const HOST = process.env.HOST || '0.0.0.0';
-
-server.listen(PORT, HOST, () => {
-  console.log(`✅ Server running on ${HOST}:${PORT}`);
-  console.log(`📡 WebSocket server ready for connections`);
-  console.log(`🌐 Admin panel: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/admin.html`);
-  console.log(`🎧 User interface: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/radio-player.html`);
-});
+console.log(`🌐 WebSocket server running on ws://localhost:${PORT}`);
