@@ -7,25 +7,9 @@ let ws;
 let audioContext;
 let scriptProcessor;
 let gainNode;
-
-// Professional audio parameters
-const SAMPLE_RATE = 48000;
-const CHANNELS = 2;
-const BUFFER_SIZE = 2048; // Smaller buffer for lower latency
-const QUALITY_FACTOR = 1.0; // Maximum quality multiplier
-
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const status = document.getElementById("status");
-const player = document.getElementById("player");
-
-let ws;
-let audioContext;
-let scriptProcessor;
-let gainNode;
 let audioWorkletNode;
 
-// Pristine audio parameters
+// Stable audio parameters
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const BUFFER_SIZE = 2048;
@@ -81,40 +65,40 @@ async function connectAsUser() {
   ws = new WebSocket(`wss://${window.location.host}`);
   
   try {
-    // Initialize pristine audio context
+    // Initialize stable audio context
     audioContext = new (window.AudioContext || window.webkitAudioContext)({
       sampleRate: SAMPLE_RATE,
       latencyHint: 'playback'
     });
     
-    // Load AudioWorklet for pristine processing
+    // Load stable AudioWorklet processor
     await audioContext.audioWorklet.addModule('./audio-processor.js');
     
-    // Create pristine audio worklet node
-    audioWorkletNode = new AudioWorkletNode(audioContext, 'pristine-audio-processor');
+    // Create stable audio worklet node
+    audioWorkletNode = new AudioWorkletNode(audioContext, 'stable-audio-processor');
     
-    // Professional gain control
+    // Simple gain control
     gainNode = audioContext.createGain();
     gainNode.gain.value = 1.0;
     
-    // Connect pristine audio chain
+    // Connect stable audio chain
     audioWorkletNode.connect(gainNode);
     gainNode.connect(audioContext.destination);
     
-    // Handle status updates from AudioWorklet
+    // Handle status updates
     audioWorkletNode.port.onmessage = (event) => {
       const { type, bufferMs, playing } = event.data;
       if (type === 'status') {
-        const playingIndicator = playing ? '🎵' : '⏳';
-        status.textContent = `${playingIndicator} Pristine Audio (${bufferMs}ms buffer)`;
+        const indicator = playing ? '🎵' : '⏳';
+        status.textContent = `${indicator} Stable Audio (${bufferMs}ms)`;
       }
     };
     
-    status.textContent = "🎧 Pristine Audio System Initialized...";
+    status.textContent = "🎧 Stable Audio System Ready...";
     
   } catch (error) {
-    console.warn('AudioWorklet not supported, falling back to legacy mode');
-    // Fallback to legacy implementation if AudioWorklet not supported
+    console.warn('AudioWorklet not supported, using legacy mode');
+    // Fallback to simple ScriptProcessor
     gainNode = audioContext.createGain();
     gainNode.gain.value = 1.0;
     gainNode.connect(audioContext.destination);
@@ -123,11 +107,11 @@ async function connectAsUser() {
   }
 
   ws.onopen = () => {
-    status.textContent = "✅ Pristine Audio Ready - Ultra High Quality";
+    status.textContent = "✅ Connected - Stable Quality Audio";
   };
 
   ws.onmessage = (event) => {
-    // Send PCM data to AudioWorklet for pristine processing
+    // Send data to stable processor
     if (audioWorkletNode) {
       audioWorkletNode.port.postMessage({
         type: 'pcm-data',
@@ -137,7 +121,7 @@ async function connectAsUser() {
   };
 
   ws.onclose = () => {
-    status.textContent = "🔌 Connection lost - reconnecting...";
+    status.textContent = "🔌 Reconnecting...";
     if (audioWorkletNode) {
       audioWorkletNode.port.postMessage({ type: 'clear-buffer' });
     }
@@ -150,42 +134,31 @@ async function connectAsUser() {
   };
 }
 
-// Admin: Pristine broadcasting with maximum quality
+// Stable broadcasting
 startBtn.onclick = async () => {
   ws = new WebSocket(`wss://${window.location.host}`);
 
   ws.onopen = async () => {
     try {
-      // Pristine audio capture settings
+      // Conservative audio settings for stability
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
           sampleRate: SAMPLE_RATE,
           channelCount: CHANNELS,
-          sampleSize: 16,
           echoCancellation: false,
           noiseSuppression: false,
-          autoGainControl: false,
-          googEchoCancellation: false,
-          googAutoGainControl: false,
-          googNoiseSuppression: false,
-          googHighpassFilter: false,
-          googTypingNoiseDetection: false,
-          googAudioMirroring: false
+          autoGainControl: false
         } 
       });
       
-      // Pristine Web Audio API setup
+      // Stable audio processing
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: SAMPLE_RATE,
-        latencyHint: 'playback'
+        sampleRate: SAMPLE_RATE
       });
       
-      // Pristine audio processing chain
       const source = audioContext.createMediaStreamSource(stream);
-      
-      // Add pristine gain staging
       gainNode = audioContext.createGain();
-      gainNode.gain.value = 1.0;
+      gainNode.gain.value = 0.8; // Conservative gain to prevent clipping
       
       scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
       
@@ -194,50 +167,48 @@ startBtn.onclick = async () => {
           const inputBuffer = event.inputBuffer;
           const outputData = new Int16Array(BUFFER_SIZE * CHANNELS);
           
-          // Pristine stereo PCM extraction
+          // Simple stable stereo processing
           const leftChannel = inputBuffer.getChannelData(0);
           const rightChannel = inputBuffer.getChannelData(1);
           
           for (let i = 0; i < BUFFER_SIZE; i++) {
-            // Pristine sample processing with perfect stereo interleaving
-            const leftSample = Math.max(-1, Math.min(1, leftChannel[i]));
-            const rightSample = Math.max(-1, Math.min(1, rightChannel[i]));
+            // Conservative sample processing
+            const left = Math.max(-0.95, Math.min(0.95, leftChannel[i]));
+            const right = Math.max(-0.95, Math.min(0.95, rightChannel[i]));
             
-            // Ultra-high precision conversion to Int16
-            outputData[i * 2] = Math.round(leftSample * 32767);
-            outputData[i * 2 + 1] = Math.round(rightSample * 32767);
+            // Stable conversion
+            outputData[i * 2] = Math.round(left * 32000);     // Conservative range
+            outputData[i * 2 + 1] = Math.round(right * 32000);
           }
           
-          // Pristine data transmission
           ws.send(outputData.buffer);
         }
       };
       
-      // Pristine audio signal chain
+      // Simple audio chain
       source.connect(gainNode);
       gainNode.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
       
-      status.textContent = "🎤 Pristine Broadcast Active - Ultra Quality";
+      status.textContent = "🎤 Stable Broadcast Active";
       startBtn.disabled = true;
       stopBtn.disabled = false;
       
     } catch (error) {
-      console.error('Pristine audio setup failed:', error);
-      status.textContent = "❌ Pristine audio access failed";
+      console.error('Audio setup failed:', error);
+      status.textContent = "❌ Microphone access failed";
     }
   };
 
   ws.onerror = () => {
-    status.textContent = "❌ Pristine broadcast connection failed";
+    status.textContent = "❌ Connection failed";
     startBtn.disabled = false;
     stopBtn.disabled = true;
   };
 };
 
-// Pristine broadcast stop with proper cleanup
+// Stop broadcasting
 stopBtn.onclick = () => {
-  // Pristine audio chain cleanup
   if (scriptProcessor) {
     scriptProcessor.disconnect();
     scriptProcessor = null;
@@ -259,21 +230,19 @@ stopBtn.onclick = () => {
     ws.close();
   }
   
-  status.textContent = "🛑 Pristine Broadcast Stopped";
+  status.textContent = "🛑 Broadcast Stopped";
   startBtn.disabled = false;
   stopBtn.disabled = true;
 };
 
-// Pristine volume control
+// Volume control
 if (player) {
   player.addEventListener('volumechange', () => {
     if (gainNode) {
-      // Pristine volume scaling (logarithmic)
-      const volume = player.volume;
-      gainNode.gain.value = volume * volume;
+      gainNode.gain.value = player.volume;
     }
   });
 }
 
-// Initialize pristine audio system
+// Initialize stable audio system
 connectAsUser();
