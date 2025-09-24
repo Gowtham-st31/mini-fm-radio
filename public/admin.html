@@ -187,10 +187,10 @@
   </div>
 
   <script>
-    // Render-optimized audio streaming constants
-    const SAMPLE_RATE = 48000;
+    // High-quality audio streaming constants
+    const SAMPLE_RATE = 44100; // CD quality
     const CHANNELS = 2;
-    const BUFFER_SIZE = 4096;
+    const BUFFER_SIZE = 2048; // Smaller buffer for less latency
     
     let websocket = null;
     let audioContext = null;
@@ -255,19 +255,21 @@
         let stream;
         
         if (currentMode === 'microphone') {
-          // Render-optimized microphone capture
+          // High-quality microphone capture
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: false,
               noiseSuppression: false,
               autoGainControl: false,
               sampleRate: SAMPLE_RATE,
-              channelCount: 1
+              channelCount: 1,
+              sampleSize: 16,
+              latency: 0.02 // Low latency
             }
           });
           
         } else if (currentMode === 'screen') {
-          // Render-optimized screen audio capture
+          // High-quality screen audio capture
           updateStatus('🖥️ Please select screen/tab to share audio...', 'streaming');
           
           stream = await navigator.mediaDevices.getDisplayMedia({
@@ -277,12 +279,13 @@
               noiseSuppression: false,
               autoGainControl: false,
               sampleRate: SAMPLE_RATE,
-              channelCount: CHANNELS
+              channelCount: CHANNELS,
+              sampleSize: 16
             }
           });
           
         } else if (currentMode === 'mixed') {
-          // Render-optimized mixed audio
+          // High-quality mixed audio
           updateStatus('🎵 Setting up mixed audio (mic + screen)...', 'streaming');
           
           const micStream = await navigator.mediaDevices.getUserMedia({
@@ -290,7 +293,8 @@
               echoCancellation: false,
               noiseSuppression: false,
               autoGainControl: false,
-              sampleRate: SAMPLE_RATE
+              sampleRate: SAMPLE_RATE,
+              sampleSize: 16
             }
           });
           
@@ -300,7 +304,8 @@
               echoCancellation: false,
               noiseSuppression: false,
               autoGainControl: false,
-              sampleRate: SAMPLE_RATE
+              sampleRate: SAMPLE_RATE,
+              sampleSize: 16
             }
           });
           
@@ -327,38 +332,42 @@
         // Connect to Render WebSocket
         await connectRenderWebSocket();
         
-        updateStatus('🎙️ Processing Render-optimized audio...', 'streaming');
+        updateStatus('🎙️ Processing high-quality audio...', 'streaming');
         
-        // Create Render-optimized audio context
+        // Create high-quality audio context
         if (!audioContext) {
           audioContext = new (window.AudioContext || window.webkitAudioContext)({
-            sampleRate: SAMPLE_RATE
+            sampleRate: SAMPLE_RATE,
+            latencyHint: 'interactive'
           });
           await audioContext.resume();
         }
         
-        // Create Render-optimized audio processing pipeline
+        // Create simplified audio processing pipeline
         source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
         
         processor.onaudioprocess = function(event) {
           if (isRecording && websocket && websocket.readyState === WebSocket.OPEN) {
             const inputBuffer = event.inputBuffer;
-            const outputData = new Int16Array(BUFFER_SIZE * CHANNELS);
+            const numChannels = Math.min(inputBuffer.numberOfChannels, CHANNELS);
+            const frameCount = inputBuffer.length;
             
-            // Render-optimized stereo processing
-            for (let channel = 0; channel < Math.min(inputBuffer.numberOfChannels, CHANNELS); channel++) {
-              const channelData = inputBuffer.getChannelData(channel);
-              for (let i = 0; i < BUFFER_SIZE; i++) {
-                const sample = Math.max(-1, Math.min(1, channelData[i]));
-                outputData[i * CHANNELS + channel] = Math.round(sample * 32767);
+            // Create high-quality interleaved PCM data
+            const outputData = new Int16Array(frameCount * CHANNELS);
+            
+            for (let frame = 0; frame < frameCount; frame++) {
+              for (let channel = 0; channel < numChannels; channel++) {
+                const channelData = inputBuffer.getChannelData(channel);
+                // High-quality conversion with proper clamping
+                let sample = channelData[frame];
+                sample = Math.max(-1, Math.min(1, sample)); // Clamp to prevent distortion
+                outputData[frame * CHANNELS + channel] = Math.round(sample * 32767);
               }
-            }
-            
-            // Fill missing channel if mono input
-            if (inputBuffer.numberOfChannels === 1 && CHANNELS === 2) {
-              for (let i = 0; i < BUFFER_SIZE; i++) {
-                outputData[i * CHANNELS + 1] = outputData[i * CHANNELS];
+              
+              // Duplicate mono to stereo if needed
+              if (numChannels === 1 && CHANNELS === 2) {
+                outputData[frame * CHANNELS + 1] = outputData[frame * CHANNELS];
               }
             }
             
@@ -366,13 +375,12 @@
               websocket.send(outputData.buffer);
               sendCount++;
               
-              if (sendCount % 100 === 0) {
-                console.log(`📡 Sent ${sendCount} chunks to Render (${sendErrors} errors)`);
-                updateRenderStats();
+              if (sendCount % 200 === 0) {
+                console.log(`🎵 High-quality: ${sendCount} chunks sent (${sendErrors} errors)`);
               }
             } catch (error) {
               sendErrors++;
-              console.error('Render send error:', error);
+              console.error('Send error:', error);
             }
           }
         };
