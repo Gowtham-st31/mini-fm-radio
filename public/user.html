@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FM Radio - PCM Player</title>
+  <title>FM Radio - User Player</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -19,27 +19,7 @@
     .container {
       max-width: 600px;
       margin: 0 auto;
-      ba                    // Check if we're resuming from pause
-          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
-            console.log('🔄 Stream resumed - restarting audio system');
-            streamState = 'restarting';
-            
-            // Complete system reset for clean restart
-            resetAudioSystem();
-            
-            streamState = 'active';
-            updateStatus('🔴 LIVE - Stream resumed successfully!', 'success');
-          } we're resuming from pause
-          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
-            console.log('🔄 Stream resumed - restarting audio system');
-            streamState = 'restarting';
-            
-            // Complete system reset for clean restart
-            resetAudioSystem();
-            
-            streamState = 'active';
-            updateStatus('🔴 LIVE - Stream resumed successfully!', 'success');
-          }gba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.1);
       padding: 40px;
       border-radius: 20px;
       backdrop-filter: blur(10px);
