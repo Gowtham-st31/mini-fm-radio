@@ -1,4 +1,4 @@
-// High-quality FM radio server for Render hosting
+// Natural voice quality FM radio server
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -6,120 +6,70 @@ const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
+
+// WebSocket server optimized for natural voice quality
 const wss = new WebSocket.Server({ 
   server,
-  perMessageDeflate: false // Disable compression for better audio quality
+  perMessageDeflate: false, // No compression for natural audio
+  maxPayload: 1024 * 1024   // 1MB max for WebM chunks
 });
 
-// High-quality audio constants
-const SAMPLE_RATE = 44100; // CD quality
-const CHANNELS = 2;
-const BYTES_PER_SAMPLE = 2;
-
-// Client management
-const clients = new Map();
-
-// Render-optimized WebSocket server
-const wss = new WebSocket.Server({ 
-  server,
-  perMessageDeflate: false, // Disable compression for lower latency
-  maxPayload: 64 * 1024,    // 64KB max message size
-  clientTracking: true
-});
-
-let clients = new Map(); // Use Map for better client management
-let broadcastStats = { sent: 0, received: 0, errors: 0 };
-
-// Heartbeat interval for Render connection stability
-const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+let clients = [];
+let broadcastCount = 0;
+let serverStartTime = Date.now();
 
 wss.on("connection", (ws, req) => {
-  const clientId = Date.now() + Math.random();
-  const clientInfo = {
-    ws: ws,
-    alive: true,
-    ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-    connected: new Date()
-  };
-  
-  clients.set(clientId, clientInfo);
-  console.log(`✅ Client ${clientId} connected from ${clientInfo.ip}`);
+  clients.push(ws);
+  console.log(`🎵 New client connected (${clients.length} total)`);
 
-  // Render connection stability - heartbeat
-  ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
-
-  ws.on("message", (message) => {
-    broadcastStats.received++;
-    console.log(`📡 Audio chunk received: ${message.length} bytes (Total: ${broadcastStats.received})`);
+  ws.on("message", (audioData) => {
+    broadcastCount++;
     
-    // Optimized broadcast for Render
+    // Broadcast natural audio to all other clients
     let successCount = 0;
-    let errorCount = 0;
-    
-    clients.forEach((client, id) => {
-      if (id !== clientId && client.ws.readyState === WebSocket.OPEN) {
+    clients = clients.filter(client => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
         try {
-          client.ws.send(message);
+          client.send(audioData);
           successCount++;
+          return true;
         } catch (error) {
-          console.error(`❌ Broadcast error to client ${id}:`, error.message);
-          errorCount++;
-          broadcastStats.errors++;
-          
-          // Remove failed client
-          clients.delete(id);
+          console.error('❌ Broadcast error:', error.message);
+          return false;
         }
       }
+      return client === ws || client.readyState === WebSocket.OPEN;
     });
     
-    broadcastStats.sent += successCount;
-    
-    if (broadcastStats.received % 100 === 0) { // Log every 100 chunks
-      console.log(`� Stats - Received: ${broadcastStats.received}, Sent: ${broadcastStats.sent}, Errors: ${broadcastStats.errors}`);
-      console.log(`👥 Active clients: ${clients.size}`);
+    if (broadcastCount % 100 === 0) {
+      console.log(`🎵 Natural voice broadcast #${broadcastCount} to ${successCount} clients`);
     }
   });
 
   ws.on("close", () => {
-    clients.delete(clientId);
-    console.log(`❌ Client ${clientId} disconnected. Active clients: ${clients.size}`);
+    clients = clients.filter(client => client !== ws);
+    console.log(`👋 Client disconnected (${clients.length} remaining)`);
   });
 
   ws.on("error", (error) => {
-    console.error(`💥 WebSocket error for client ${clientId}:`, error.message);
-    clients.delete(clientId);
+    console.error('❌ WebSocket error:', error.message);
+    clients = clients.filter(client => client !== ws);
   });
 });
 
-// Render connection stability - heartbeat system
-setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (!ws.isAlive) {
-      console.log('💀 Terminating inactive connection');
-      return ws.terminate();
-    }
-    
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, HEARTBEAT_INTERVAL);
+// Serve static files
+app.use(express.static(path.join(__dirname, "public")));
 
-// Render-optimized static file serving
-app.use(express.static(path.join(__dirname, "public"), {
-  maxAge: '1d',           // Cache static files for better performance
-  etag: false,           // Disable etag for simpler responses
-  lastModified: false    // Disable last-modified for simpler responses
-}));
-
-// Health check endpoint for Render
+// Health check
 app.get('/health', (req, res) => {
+  const uptime = Math.floor((Date.now() - serverStartTime) / 1000);
   res.json({
     status: 'healthy',
-    clients: clients.size,
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    stats: broadcastStats
+    clients: clients.length,
+    uptime: uptime,
+    broadcasts: broadcastCount,
+    audioQuality: 'high',
+    sampleRate: SAMPLE_RATE
   });
 });
 
@@ -127,9 +77,9 @@ const PORT = process.env.PORT || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
-  console.log(`✅ Render-optimized server running on ${HOST}:${PORT}`);
-  console.log(`📡 WebSocket server ready with heartbeat monitoring`);
-  console.log(`🌐 Admin panel: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/admin.html`);
-  console.log(`🎧 User interface: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/`);
-  console.log(`💚 Health check: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/health`);
+  console.log(`🎵 Natural Voice FM Server running on ${HOST}:${PORT}`);
+  console.log(`📻 Audio: WebM/Opus format, optimized for natural voice`);
+  console.log(`🖥️ Screen Admin: http://localhost:${PORT}/screen-admin.html`);
+  console.log(`🎧 User Player: http://localhost:${PORT}/user.html`);
+  console.log(`💚 Health: http://localhost:${PORT}/health`);
 });
