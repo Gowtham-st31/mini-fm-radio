@@ -1,586 +1,71 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FM Radio - PCM Player</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      text-align: center;
-      padding: 20px;
-      margin: 0;
-      min-height: 100vh;
-    }
-    
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      background: rgba(255, 255, 255, 0.1);
-      padding: 40px;
-      border-radius: 20px;
-      backdrop-filter: blur(10px);
-    }
-    
-    h1 {
-      color: #ff6b35;
-      margin-bottom: 30px;
-      font-size: 2.5rem;
-    }
-    
-    .status {
-      padding: 20px;
-      margin: 20px 0;
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 15px;
-      font-size: 1.2rem;
-      min-height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    .btn {
-      background: linear-gradient(45deg, #ff6b35, #f7931e);
-      color: white;
-      border: none;
-      padding: 18px 35px;
-      font-size: 1.2rem;
-      border-radius: 30px;
-      cursor: pointer;
-      margin: 15px;
-      min-width: 200px;
-      font-weight: 600;
-    }
-    
-    .btn:disabled {
-      background: #666;
-      cursor: not-allowed;
-    }
-    
-    .btn.stop {
-      background: linear-gradient(45deg, #e74c3c, #c0392b);
-    }
-    
-    .audio-section {
-      margin: 30px 0;
-      padding: 25px;
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 15px;
-      display: none;
-    }
-    
-    .play-controls {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 25px;
-      margin: 25px 0;
-    }
-    
-    .play-btn {
-      background: linear-gradient(45deg, #27ae60, #2ecc71);
-      color: white;
-      border: none;
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      font-size: 2rem;
-      cursor: pointer;
-    }
-    
-    .volume-control {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    
-    .volume-slider {
-      width: 120px;
-      height: 6px;
-      border-radius: 3px;
-      background: rgba(255, 255, 255, 0.3);
-      outline: none;
-    }
-    
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 15px;
-      margin: 25px 0;
-    }
-    
-    .stat {
-      background: rgba(0, 0, 0, 0.3);
-      padding: 20px 15px;
-      border-radius: 12px;
-      text-align: center;
-    }
-    
-    .stat-value {
-      font-size: 1.8rem;
-      font-weight: bold;
-      color: #ff6b35;
-      margin-bottom: 8px;
-    }
-    
-    .stat-label {
-      font-size: 0.9rem;
-      opacity: 0.8;
-    }
-    
-    .success {
-      background: rgba(46, 204, 113, 0.3) !important;
-      color: #2ecc71 !important;
-    }
-    
-    .error {
-      background: rgba(231, 76, 60, 0.3) !important;
-      color: #e74c3c !important;
-    }
-    
-    .streaming {
-      background: rgba(52, 152, 219, 0.3) !important;
-      color: #3498db !important;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-    
-    .streaming {
-      animation: pulse 2s ease-in-out infinite;
-    }
-    
-    .visualizer {
-      margin: 25px 0;
-      height: 60px;
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    
-    .wave {
-      width: 3px;
-      background: linear-gradient(to top, #ff6b35, #f7931e);
-      margin: 0 1px;
-      border-radius: 1px;
-      transition: height 0.1s ease;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>User - Mini FM Radio</title>
 </head>
 <body>
-  <div class="container">
-    <h1>📻 FM Radio - PCM Player</h1>
-    
-    <div class="status" id="statusDisplay">
-      🎧 Ready for live radio
-    </div>
-    
-    <div>
-      <button class="btn" id="connectBtn" onclick="startRadio()">
-        🎵 Connect to Radio
-      </button>
-      <button class="btn stop" id="stopBtn" onclick="stopRadio()" style="display: none;">
-        ⏹️ Stop Radio
-      </button>
-    </div>
-    
-    <div class="audio-section" id="audioSection">
-      <div class="play-controls">
-        <button class="play-btn" id="playBtn" onclick="toggleAudio()">
-          ▶️
-        </button>
-        
-        <div class="volume-control">
-          <span>🔊</span>
-          <input type="range" id="volumeSlider" class="volume-slider" 
-                 min="0" max="100" value="70" onchange="setVolume(this.value)">
-          <span id="volumeDisplay">70%</span>
-        </div>
-      </div>
-      
-      <div class="visualizer" id="visualizer"></div>
-    </div>
-    
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-value" id="connectionStat">❌</div>
-        <div class="stat-label">Connection</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value" id="chunkStat">0</div>
-        <div class="stat-label">Chunks</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value" id="dataStat">0 KB</div>
-        <div class="stat-label">Data</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value" id="bufferStat">0%</div>
-        <div class="stat-label">Buffer</div>
-      </div>
-    </div>
-  </div>
+<h1>User Radio Player</h1>
+<button onclick="startRadio()">Connect & Play</button>
+<button onclick="stopRadio()">Stop</button>
+<p id="status">Status: Idle</p>
 
-  <script>
-    // Audio variables
-    let websocket = null;
-    let audioContext = null;
-    let gainNode = null;
-    let isStreaming = false;
-    let isPlaying = false;
-    let chunkCount = 0;
-    let totalBytes = 0;
-    
-    // PCM buffer management
-    let pcmBuffer = [];
-    let isProcessingAudio = false;
-    let sampleRate = 48000;
-    
-    // DOM elements
-    const statusDisplay = document.getElementById('statusDisplay');
-    const connectBtn = document.getElementById('connectBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const audioSection = document.getElementById('audioSection');
-    const playBtn = document.getElementById('playBtn');
-    const volumeSlider = document.getElementById('volumeSlider');
-    const volumeDisplay = document.getElementById('volumeDisplay');
-    const visualizer = document.getElementById('visualizer');
-    const connectionStat = document.getElementById('connectionStat');
-    const chunkStat = document.getElementById('chunkStat');
-    const dataStat = document.getElementById('dataStat');
-    const bufferStat = document.getElementById('bufferStat');
+<script>
+let websocket = null;
+let audioContext = null;
+let gainNode = null;
+let isPlaying = false;
+let pcmBuffer = [];
 
-    // Initialize visualizer
-    function createVisualizer() {
-      visualizer.innerHTML = '';
-      for (let i = 0; i < 40; i++) {
-        const wave = document.createElement('div');
-        wave.className = 'wave';
-        wave.style.height = '5px';
-        visualizer.appendChild(wave);
-      }
+async function startRadio() {
+  websocket = new WebSocket("ws://localhost:8080");
+  websocket.binaryType = "arraybuffer";
+
+  websocket.onopen = () => {
+    document.getElementById("status").innerText = "Connected to server";
+    startPlayback();
+  };
+
+  websocket.onmessage = (event) => {
+    pcmBuffer.push(new Int16Array(event.data));
+    if (!isPlaying) playBuffer();
+  };
+}
+
+function startPlayback() {
+  audioContext = new AudioContext({ sampleRate: 48000 });
+  gainNode = audioContext.createGain();
+  gainNode.connect(audioContext.destination);
+  gainNode.gain.value = 0.7;
+  isPlaying = true;
+}
+
+async function playBuffer() {
+  while (pcmBuffer.length > 0 && isPlaying) {
+    const pcmData = pcmBuffer.shift();
+    const floatData = new Float32Array(pcmData.length);
+    for (let i = 0; i < pcmData.length; i++) {
+      floatData[i] = pcmData[i] / 32768;
     }
 
-    // Animate visualizer based on audio data
-    function animateVisualizer(audioData = null) {
-      const waves = visualizer.querySelectorAll('.wave');
-      
-      if (audioData && isPlaying) {
-        // Use actual audio data for visualization
-        const step = Math.floor(audioData.length / waves.length);
-        waves.forEach((wave, index) => {
-          const dataIndex = index * step;
-          const amplitude = Math.abs(audioData[dataIndex] || 0);
-          const height = Math.min(amplitude * 60 + 5, 50);
-          wave.style.height = height + 'px';
-        });
-      } else {
-        // Random animation when not playing
-        waves.forEach(wave => {
-          const height = Math.random() * (isPlaying ? 30 : 10) + 5;
-          wave.style.height = height + 'px';
-          wave.style.opacity = isPlaying ? 0.9 : 0.3;
-        });
-      }
-    }
+    const audioBuffer = audioContext.createBuffer(1, floatData.length, audioContext.sampleRate);
+    audioBuffer.getChannelData(0).set(floatData);
 
-    // Start radio
-    async function startRadio() {
-      try {
-        updateStatus('🔧 Initializing Web Audio API...', 'streaming');
-        
-        // Create Web Audio context
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: sampleRate
-        });
-        
-        await audioContext.resume();
-        
-        // Create gain node for volume control
-        gainNode = audioContext.createGain();
-        gainNode.connect(audioContext.destination);
-        gainNode.gain.value = 0.7;
-        
-        updateStatus('🌐 Connecting to radio server...', 'streaming');
-        
-        // Connect to WebSocket
-        await connectWebSocket();
-        
-        // Initialize streaming
-        isStreaming = true;
-        chunkCount = 0;
-        totalBytes = 0;
-        pcmBuffer = [];
-        
-        // Update UI
-        connectBtn.style.display = 'none';
-        stopBtn.style.display = 'inline-block';
-        audioSection.style.display = 'block';
-        
-        createVisualizer();
-        setInterval(() => animateVisualizer(), 100);
-        
-        updateStatus('✅ Connected! Receiving audio...', 'success');
-        
-        console.log('🎧 PCM radio streaming started');
-        
-      } catch (error) {
-        console.error('❌ Failed to start radio:', error);
-        updateStatus('❌ Failed to start: ' + error.message, 'error');
-      }
-    }
+    const bufferSource = audioContext.createBufferSource();
+    bufferSource.buffer = audioBuffer;
+    bufferSource.connect(gainNode);
+    bufferSource.start();
 
-    // Connect to WebSocket
-    function connectWebSocket() {
-      return new Promise((resolve, reject) => {
-        try {
-          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const wsUrl = protocol + '//' + window.location.host;
-          
-          console.log('🔗 Connecting to:', wsUrl);
-          
-          websocket = new WebSocket(wsUrl);
-          websocket.binaryType = 'arraybuffer';
-          
-          websocket.onopen = () => {
-            console.log('✅ WebSocket connected');
-            connectionStat.textContent = '✅';
-            resolve();
-          };
-          
-          websocket.onmessage = async (event) => {
-            if (isStreaming) {
-              await handlePCMData(event.data);
-            }
-          };
-          
-          websocket.onclose = () => {
-            console.log('❌ WebSocket disconnected');
-            updateStatus('❌ Connection lost', 'error');
-            connectionStat.textContent = '❌';
-          };
-          
-          websocket.onerror = (error) => {
-            console.error('❌ WebSocket error:', error);
-            updateStatus('❌ Connection failed', 'error');
-            connectionStat.textContent = '❌';
-            reject(new Error('WebSocket connection failed'));
-          };
-          
-        } catch (error) {
-          console.error('❌ Failed to create WebSocket:', error);
-          reject(error);
-        }
-      });
-    }
+    await new Promise(r => setTimeout(r, audioBuffer.duration * 1000));
+  }
+}
 
-    // Handle incoming PCM data
-    async function handlePCMData(arrayBuffer) {
-      chunkCount++;
-      totalBytes += arrayBuffer.byteLength;
-      
-      // Update stats
-      chunkStat.textContent = chunkCount;
-      dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(pcmBuffer.length * 10, 100) + '%';
-      
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
-      
-      // Convert ArrayBuffer to Float32Array for audio processing
-      const pcmData = new Int16Array(arrayBuffer);
-      const floatData = new Float32Array(pcmData.length);
-      
-      // Convert int16 to float32 (-1 to 1 range)
-      for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768.0;
-      }
-      
-      // Add to buffer
-      pcmBuffer.push(floatData);
-      
-      // Animate visualizer with actual audio data
-      if (isPlaying) {
-        animateVisualizer(floatData);
-      }
-      
-      // Auto-enable play after receiving some data
-      if (chunkCount === 3 && !isPlaying) {
-        updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
-      }
-      
-      // Process audio if playing
-      if (isPlaying && !isProcessingAudio) {
-        processAudioBuffer();
-      }
-      
-      // Keep buffer manageable
-      if (pcmBuffer.length > 20) {
-        pcmBuffer = pcmBuffer.slice(-15);
-      }
-    }
-
-    // Process audio buffer and play
-    async function processAudioBuffer() {
-      if (isProcessingAudio || pcmBuffer.length === 0 || !isPlaying) return;
-      
-      isProcessingAudio = true;
-      
-      try {
-        while (pcmBuffer.length > 0 && isPlaying) {
-          const audioData = pcmBuffer.shift();
-          
-          // Create audio buffer
-          const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
-          const channelData = audioBuffer.getChannelData(0);
-          
-          // Copy PCM data to audio buffer
-          for (let i = 0; i < audioData.length; i++) {
-            channelData[i] = audioData[i];
-          }
-          
-          // Create and play source
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(gainNode);
-          source.start(0);
-          
-          console.log('🎵 Playing PCM audio chunk');
-          
-          // Wait for this chunk duration
-          const duration = audioBuffer.duration * 1000;
-          await new Promise(resolve => setTimeout(resolve, Math.min(duration * 0.8, 80)));
-        }
-        
-      } catch (error) {
-        console.error('❌ Audio processing error:', error);
-      } finally {
-        isProcessingAudio = false;
-        
-        // Continue if more data available
-        if (pcmBuffer.length > 0 && isPlaying) {
-          setTimeout(processAudioBuffer, 20);
-        }
-      }
-    }
-
-    // Toggle audio playback
-    async function toggleAudio() {
-      if (!isStreaming) {
-        updateStatus('❌ Please connect to radio first', 'error');
-        return;
-      }
-      
-      try {
-        if (isPlaying) {
-          // Stop playing
-          isPlaying = false;
-          playBtn.textContent = '▶️';
-          updateStatus('⏸️ Audio paused', 'success');
-          
-        } else {
-          // Start playing
-          if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-          }
-          
-          isPlaying = true;
-          playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing live radio!', 'success');
-          
-          // Start processing if we have data
-          if (pcmBuffer.length > 0) {
-            processAudioBuffer();
-          }
-        }
-        
-      } catch (error) {
-        console.error('❌ Audio toggle error:', error);
-        updateStatus('❌ Audio error: ' + error.message, 'error');
-      }
-    }
-
-    // Set volume
-    function setVolume(value) {
-      const volume = value / 100;
-      if (gainNode) {
-        gainNode.gain.value = volume;
-      }
-      volumeDisplay.textContent = value + '%';
-    }
-
-    // Stop radio
-    function stopRadio() {
-      isStreaming = false;
-      isPlaying = false;
-      isProcessingAudio = false;
-      
-      // Clear buffer
-      pcmBuffer = [];
-      
-      // Close Web Audio Context
-      if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-      }
-      
-      // Close WebSocket
-      if (websocket) {
-        websocket.close();
-      }
-      
-      // Reset variables
-      gainNode = null;
-      chunkCount = 0;
-      totalBytes = 0;
-      
-      // Update UI
-      connectBtn.style.display = 'inline-block';
-      stopBtn.style.display = 'none';
-      audioSection.style.display = 'none';
-      playBtn.textContent = '▶️';
-      
-      updateStatus('⏹️ Radio stopped');
-      connectionStat.textContent = '❌';
-      
-      console.log('⏹️ PCM radio streaming stopped');
-    }
-
-    // Update status display
-    function updateStatus(message, type = '') {
-      statusDisplay.textContent = message;
-      statusDisplay.className = 'status';
-      if (type) {
-        statusDisplay.classList.add(type);
-      }
-    }
-
-    // Format bytes for display
-    function formatBytes(bytes) {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return Math.round(bytes / Math.pow(k, i)) + ' ' + sizes[i];
-    }
-
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-      if (websocket) websocket.close();
-      if (audioContext) audioContext.close();
-    });
-
-    // Initialize
-    window.addEventListener('load', () => {
-      console.log('📻 PCM FM Radio Player loaded');
-    });
-  </script>
+function stopRadio() {
+  isPlaying = false;
+  if (audioContext) audioContext.close();
+  if (websocket) websocket.close();
+  document.getElementById("status").innerText = "Stopped";
+}
+</script>
 </body>
 </html>
