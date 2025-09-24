@@ -253,6 +253,13 @@
     let minBufferSize = 2400; // 50ms at 48kHz
     let targetBufferSize = 4800; // 100ms at 48kHz
     
+    // Admin pause/resume detection
+    let silenceDetector = 0;
+    let lastAudioLevel = 0;
+    let silenceThreshold = 0.001; // Very low audio level
+    let silenceDuration = 0;
+    let maxSilenceBeforeReset = 1000; // 1 second of silence triggers reset
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -429,9 +436,38 @@
         
         // Convert to float with better precision
         const floatData = new Float32Array(pcmData.length);
+        let maxAmplitude = 0;
+        
         for (let i = 0; i < pcmData.length; i++) {
           floatData[i] = Math.max(-1, Math.min(1, pcmData[i] / 32768.0));
+          maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
         }
+        
+        // Detect admin pause/resume by monitoring audio levels
+        if (maxAmplitude < silenceThreshold) {
+          silenceDuration += 50; // Approximate chunk duration in ms
+          
+          if (silenceDuration > maxSilenceBeforeReset) {
+            console.log('🔇 Admin paused detected - preparing for reset');
+            silenceDetector = 1; // Mark for reset on next audio
+          }
+        } else {
+          // Audio detected - check if we need to reset after silence
+          if (silenceDetector === 1) {
+            console.log('🔄 Admin resumed - resetting audio timing');
+            
+            // Clear accumulated buffer and reset timing
+            window.pcmBuffer = new Float32Array(0);
+            nextPlayTime = audioContext.currentTime + 0.1;
+            silenceDetector = 0;
+            
+            updateStatus('🔄 Admin resumed - audio reset', 'streaming');
+          }
+          
+          silenceDuration = 0; // Reset silence counter
+        }
+        
+        lastAudioLevel = maxAmplitude;
         
         // Add to continuous buffer
         const newBuffer = new Float32Array(window.pcmBuffer.length + floatData.length);
@@ -442,7 +478,7 @@
         // Start/continue playback with adaptive scheduling
         scheduleAudioPlayback();
         
-        console.log(`🔄 Audio buffer: ${floatData.length} new, ${window.pcmBuffer.length} total`);
+        console.log(`🔄 Audio buffer: ${floatData.length} new, ${window.pcmBuffer.length} total, level: ${maxAmplitude.toFixed(4)}`);
         
       } catch (error) {
         console.error('❌ Audio processing error:', error);
@@ -538,6 +574,11 @@
           nextPlayTime = audioContext.currentTime + 0.1; // Small initial delay
           window.pcmBuffer = new Float32Array(0);
           
+          // Reset pause detection system
+          silenceDetector = 0;
+          silenceDuration = 0;
+          lastAudioLevel = 0;
+          
           // Start continuous scheduling monitor
           if (audioScheduler) clearInterval(audioScheduler);
           audioScheduler = setInterval(() => {
@@ -589,6 +630,11 @@
         window.pcmBuffer = new Float32Array(0);
       }
       nextPlayTime = 0;
+      
+      // Reset pause detection
+      silenceDetector = 0;
+      silenceDuration = 0;
+      lastAudioLevel = 0;
       
       // Close WebSocket
       if (websocket) {
