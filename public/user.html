@@ -120,11 +120,25 @@
       tempAudio.play().then(() => {
         document.getElementById('status').textContent = "🎵 Audio enabled - listening for natural voice";
         document.getElementById('status').className = "status success";
-      }).catch(() => {
+        console.log('✅ Audio enabled successfully');
+      }).catch((error) => {
         document.getElementById('status').textContent = "❌ Please enable audio in browser settings";
         document.getElementById('status').className = "status error";
+        console.error('❌ Audio enable failed:', error);
       });
     }
+    
+    // Debug WebSocket connection
+    window.addEventListener('load', () => {
+      console.log('🎧 User page loaded');
+      setTimeout(() => {
+        if (typeof ws !== 'undefined' && ws) {
+          console.log('WebSocket state:', ws.readyState);
+        } else {
+          console.log('❌ WebSocket not initialized');
+        }
+      }, 2000);
+    });
   </script>
   
   <script src="script-natural.js"></script>
