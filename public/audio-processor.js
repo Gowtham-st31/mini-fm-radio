@@ -1,64 +1,62 @@
-// AudioWorklet Processor for Pristine Audio Quality
-class PristineAudioProcessor extends AudioWorkletProcessor {
+// Stable AudioWorklet Processor with Conservative Buffering
+class StableAudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     
-    // Advanced audio buffer with jitter compensation
+    // Conservative buffer management
     this.audioBuffer = [];
-    this.bufferSize = 8192; // Larger buffer for stability
     this.sampleRate = 48000;
     this.channels = 2;
     
-    // Advanced audio processing parameters
-    this.targetBufferMs = 100; // 100ms target buffer
-    this.minBufferMs = 50;     // Minimum buffer before playback
-    this.maxBufferMs = 200;    // Maximum buffer to prevent delay
+    // Conservative buffering parameters - prevent overflow
+    this.targetBufferSamples = 2400; // 50ms at 48kHz
+    this.maxBufferSamples = 4800;    // 100ms maximum
+    this.minBufferSamples = 1200;    // 25ms minimum
     
-    // Sample interpolation for smooth playback
-    this.lastSample = [0, 0];
+    // Playback state
     this.playbackPosition = 0;
+    this.isPlaying = false;
     
-    // Message handler for receiving PCM data
+    // Message handler
     this.port.onmessage = (event) => {
       const { type, data } = event.data;
       
       if (type === 'pcm-data') {
-        this.processPCMData(data);
+        this.addPCMData(data);
       } else if (type === 'clear-buffer') {
         this.audioBuffer = [];
         this.playbackPosition = 0;
+        this.isPlaying = false;
       }
     };
     
-    // Send status updates
+    // Status reporting
     this.statusCounter = 0;
   }
   
-  processPCMData(pcmData) {
-    // Convert Int16 PCM to Float32 with professional quality
+  addPCMData(pcmData) {
     const samples = new Int16Array(pcmData);
     
-    for (let i = 0; i < samples.length; i += 2) {
-      // High-precision sample conversion
-      const left = samples[i] / 32768.0;
-      const right = samples[i + 1] / 32768.0;
-      
-      // Add samples to buffer
-      this.audioBuffer.push([left, right]);
+    // Prevent buffer overflow - drop data if buffer too large
+    const availableSpace = this.maxBufferSamples - this.audioBuffer.length;
+    if (availableSpace <= 0) {
+      // Buffer overflow protection - remove oldest samples
+      this.audioBuffer.splice(0, samples.length);
+      this.playbackPosition = Math.max(0, this.playbackPosition - samples.length);
     }
     
-    // Advanced buffer management
-    this.manageBuffer();
-  }
-  
-  manageBuffer() {
-    const bufferLengthMs = (this.audioBuffer.length / this.sampleRate) * 1000;
+    // Add new samples
+    for (let i = 0; i < samples.length; i += 2) {
+      if (i + 1 < samples.length) {
+        const left = samples[i] / 32768.0;
+        const right = samples[i + 1] / 32768.0;
+        this.audioBuffer.push([left, right]);
+      }
+    }
     
-    // Remove excess data to prevent excessive delay
-    if (bufferLengthMs > this.maxBufferMs) {
-      const samplesToRemove = Math.floor(((bufferLengthMs - this.maxBufferMs) / 1000) * this.sampleRate);
-      this.audioBuffer.splice(0, samplesToRemove);
-      this.playbackPosition = Math.max(0, this.playbackPosition - samplesToRemove);
+    // Start playback when we have enough samples
+    if (!this.isPlaying && this.audioBuffer.length >= this.minBufferSamples) {
+      this.isPlaying = true;
     }
   }
   
@@ -66,48 +64,45 @@ class PristineAudioProcessor extends AudioWorkletProcessor {
     const output = outputs[0];
     const frameCount = output[0].length;
     
-    // Get current buffer status
-    const bufferLengthMs = ((this.audioBuffer.length - this.playbackPosition) / this.sampleRate) * 1000;
-    
-    // Only start playback when we have sufficient buffer
-    const shouldPlay = bufferLengthMs >= this.minBufferMs;
-    
-    if (shouldPlay && output.length >= 2) {
+    if (this.isPlaying && output.length >= 2) {
       const leftChannel = output[0];
       const rightChannel = output[1];
       
       for (let i = 0; i < frameCount; i++) {
         if (this.playbackPosition < this.audioBuffer.length) {
-          // Get pristine samples from buffer
           const sample = this.audioBuffer[this.playbackPosition];
           leftChannel[i] = sample[0];
           rightChannel[i] = sample[1];
-          
-          this.lastSample = sample;
           this.playbackPosition++;
         } else {
-          // High-quality silence with soft fade
-          leftChannel[i] = this.lastSample[0] * 0.95;
-          rightChannel[i] = this.lastSample[1] * 0.95;
-          this.lastSample[0] *= 0.95;
-          this.lastSample[1] *= 0.95;
+          // No more data - output silence and stop playing
+          leftChannel[i] = 0;
+          rightChannel[i] = 0;
+          this.isPlaying = false;
         }
       }
+      
+      // Clean up processed samples periodically
+      if (this.playbackPosition >= this.targetBufferSamples) {
+        this.audioBuffer.splice(0, this.playbackPosition);
+        this.playbackPosition = 0;
+      }
     } else {
-      // Pristine silence while buffering
+      // Output silence when not playing
       if (output.length >= 2) {
         output[0].fill(0);
         output[1].fill(0);
       }
     }
     
-    // Send periodic status updates
+    // Send status updates
     this.statusCounter++;
-    if (this.statusCounter % 1000 === 0) { // Every ~21ms at 48kHz
+    if (this.statusCounter % 2400 === 0) { // Every 50ms
+      const bufferMs = ((this.audioBuffer.length - this.playbackPosition) / this.sampleRate * 1000).toFixed(1);
       this.port.postMessage({
         type: 'status',
-        bufferMs: bufferLengthMs.toFixed(1),
-        playing: shouldPlay
+        bufferMs: bufferMs,
+        playing: this.isPlaying
       });
     }
     
@@ -115,4 +110,4 @@ class PristineAudioProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('pristine-audio-processor', PristineAudioProcessor);
+registerProcessor('stable-audio-processor', StableAudioProcessor);
