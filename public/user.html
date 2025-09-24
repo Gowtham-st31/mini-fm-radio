@@ -231,19 +231,13 @@
   </div>
 
   <script>
-    // Audio variables
+    // Simple audio variables
     let websocket = null;
-    let audioContext = null;
-    let gainNode = null;
-    let isStreaming = false;
-    let isPlaying = false;
+    let isConnected = false;
     let chunkCount = 0;
     let totalBytes = 0;
-    
-    // Simple continuous buffer approach
-    let audioQueue = [];
-    let isPlayingAudio = false;
-    let sampleRate = 48000;
+    let audioElement = null;
+    let currentVolume = 0.7;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -270,56 +264,32 @@
       }
     }
 
-    // Animate visualizer based on audio data
-    function animateVisualizer(audioData = null) {
+    // Animate visualizer
+    function animateVisualizer() {
       const waves = visualizer.querySelectorAll('.wave');
-      
-      if (audioData && isPlaying) {
-        // Use actual audio data for visualization
-        const step = Math.floor(audioData.length / waves.length);
-        waves.forEach((wave, index) => {
-          const dataIndex = index * step;
-          const amplitude = Math.abs(audioData[dataIndex] || 0);
-          const height = Math.min(amplitude * 60 + 5, 50);
-          wave.style.height = height + 'px';
-        });
-      } else {
-        // Random animation when not playing
-        waves.forEach(wave => {
-          const height = Math.random() * (isPlaying ? 30 : 10) + 5;
-          wave.style.height = height + 'px';
-          wave.style.opacity = isPlaying ? 0.9 : 0.3;
-        });
-      }
+      waves.forEach(wave => {
+        const height = Math.random() * 40 + 5;
+        wave.style.height = height + 'px';
+      });
     }
 
-    // Start radio
+    // Start radio connection
     async function startRadio() {
       try {
-        updateStatus('🔧 Initializing Web Audio API...', 'streaming');
-        
-        // Create Web Audio context
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: sampleRate
-        });
-        
-        await audioContext.resume();
-        
-        // Create gain node for volume control
-        gainNode = audioContext.createGain();
-        gainNode.connect(audioContext.destination);
-        gainNode.gain.value = 0.7;
-        
         updateStatus('🌐 Connecting to radio server...', 'streaming');
+        
+        // Create audio element
+        audioElement = document.createElement('audio');
+        audioElement.volume = currentVolume;
+        audioElement.autoplay = true;
+        audioElement.controls = false;
         
         // Connect to WebSocket
         await connectWebSocket();
         
-        // Initialize streaming
-        isStreaming = true;
+        isConnected = true;
         chunkCount = 0;
         totalBytes = 0;
-        pcmBuffer = [];
         
         // Update UI
         connectBtn.style.display = 'none';
@@ -327,222 +297,149 @@
         audioSection.style.display = 'block';
         
         createVisualizer();
-        setInterval(() => animateVisualizer(), 100);
+        const visualizerInterval = setInterval(() => {
+          if (isConnected) {
+            animateVisualizer();
+          } else {
+            clearInterval(visualizerInterval);
+          }
+        }, 100);
         
-        updateStatus('✅ Connected! Receiving audio...', 'success');
-        
-        console.log('🎧 PCM radio streaming started');
+        updateStatus('✅ Connected! Click ▶️ to start audio', 'success');
+        console.log('🎧 Radio connection established');
         
       } catch (error) {
-        console.error('❌ Failed to start radio:', error);
-        updateStatus('❌ Failed to start: ' + error.message, 'error');
+        console.error('❌ Connection failed:', error);
+        updateStatus('❌ Failed to connect: ' + error.message, 'error');
       }
     }
 
     // Connect to WebSocket
     function connectWebSocket() {
       return new Promise((resolve, reject) => {
-        try {
-          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const wsUrl = protocol + '//' + window.location.host;
-          
-          console.log('🔗 Connecting to:', wsUrl);
-          
-          websocket = new WebSocket(wsUrl);
-          websocket.binaryType = 'arraybuffer';
-          
-          websocket.onopen = () => {
-            console.log('✅ WebSocket connected');
-            connectionStat.textContent = '✅';
-            resolve();
-          };
-          
-          websocket.onmessage = async (event) => {
-            if (isStreaming) {
-              await handlePCMData(event.data);
-            }
-          };
-          
-          websocket.onclose = () => {
-            console.log('❌ WebSocket disconnected');
-            updateStatus('❌ Connection lost', 'error');
-            connectionStat.textContent = '❌';
-          };
-          
-          websocket.onerror = (error) => {
-            console.error('❌ WebSocket error:', error);
-            updateStatus('❌ Connection failed', 'error');
-            connectionStat.textContent = '❌';
-            reject(new Error('WebSocket connection failed'));
-          };
-          
-        } catch (error) {
-          console.error('❌ Failed to create WebSocket:', error);
-          reject(error);
-        }
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = protocol + '//' + window.location.host;
+        
+        console.log('🔗 Connecting to:', wsUrl);
+        
+        websocket = new WebSocket(wsUrl);
+        websocket.binaryType = 'blob';
+        
+        websocket.onopen = () => {
+          console.log('✅ WebSocket connected');
+          connectionStat.textContent = '✅';
+          resolve();
+        };
+        
+        websocket.onmessage = (event) => {
+          handleAudioData(event.data);
+        };
+        
+        websocket.onclose = () => {
+          console.log('❌ WebSocket disconnected');
+          updateStatus('❌ Connection lost', 'error');
+          connectionStat.textContent = '❌';
+        };
+        
+        websocket.onerror = (error) => {
+          console.error('❌ WebSocket error:', error);
+          updateStatus('❌ Connection failed', 'error');
+          connectionStat.textContent = '❌';
+          reject(new Error('WebSocket connection failed'));
+        };
       });
     }
 
-    // Handle incoming PCM data
-    async function handlePCMData(arrayBuffer) {
+    // Handle incoming audio data
+    function handleAudioData(audioBlob) {
       chunkCount++;
-      totalBytes += arrayBuffer.byteLength;
+      totalBytes += audioBlob.size;
       
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(audioQueue.length * 10, 100) + '%';
+      bufferStat.textContent = '100%';
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
+      console.log(`📡 Received audio: ${audioBlob.size} bytes`);
       
-      // Convert ArrayBuffer to Float32Array for audio processing
-      const pcmData = new Int16Array(arrayBuffer);
-      const floatData = new Float32Array(pcmData.length);
-      
-      // Convert int16 to float32 (-1 to 1 range)
-      for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768.0;
-      }
-      
-      // Add to audio queue
-      audioQueue.push(floatData);
-      
-      // Animate visualizer with actual audio data
-      if (isPlaying) {
-        animateVisualizer(floatData);
-      }
-      
-      // Auto-enable play after receiving some data
-      if (chunkCount === 2 && !isPlaying) {
-        updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
-      }
-      
-      // Start playing if not already playing
-      if (isPlaying && !isPlayingAudio && audioQueue.length >= 2) {
-        startContinuousAudio();
-      }
-      
-      // Keep queue reasonable size
-      if (audioQueue.length > 10) {
-        audioQueue = audioQueue.slice(-8);
-        console.log('🗑️ Queue trimmed to prevent latency');
-      }
-    }
-
-    // Start continuous audio playback
-    async function startContinuousAudio() {
-      if (isPlayingAudio || !isPlaying) return;
-      
-      isPlayingAudio = true;
-      
-      async function playNext() {
-        if (!isPlaying || audioQueue.length === 0) {
-          isPlayingAudio = false;
-          return;
-        }
+      // Play audio blob directly
+      if (audioElement && playBtn.textContent === '⏸️') {
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioElement.src = audioUrl;
         
-        try {
-          const audioData = audioQueue.shift();
-          
-          // Create audio buffer
-          const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
-          const channelData = audioBuffer.getChannelData(0);
-          
-          // Copy data
-          for (let i = 0; i < audioData.length; i++) {
-            channelData[i] = audioData[i];
-          }
-          
-          // Play audio
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(gainNode);
-          source.start(0);
-          
-          console.log(`🎵 Playing audio chunk: ${audioData.length} samples`);
-          
-          // Schedule next playback before current ends
-          const duration = audioBuffer.duration * 1000;
-          setTimeout(playNext, Math.max(duration - 50, 20)); // Overlap slightly
-          
-        } catch (error) {
-          console.error('❌ Audio play error:', error);
-          setTimeout(playNext, 100);
+        // Cleanup URL after playing
+        audioElement.addEventListener('ended', () => {
+          URL.revokeObjectURL(audioUrl);
+        }, { once: true });
+        
+        // Auto-play if first chunk
+        if (chunkCount <= 2) {
+          audioElement.play().catch(e => {
+            console.log('⚠️ Autoplay prevented, click ▶️ to start');
+          });
         }
       }
-      
-      playNext();
     }
 
     // Toggle audio playback
     async function toggleAudio() {
-      if (!isStreaming) {
+      if (!isConnected) {
         updateStatus('❌ Please connect to radio first', 'error');
         return;
       }
       
+      if (!audioElement) {
+        updateStatus('❌ No audio available', 'error');
+        return;
+      }
+      
       try {
-        if (isPlaying) {
-          // Stop playing
-          isPlaying = false;
-          isPlayingAudio = false;
-          playBtn.textContent = '▶️';
-          updateStatus('⏸️ Audio paused', 'success');
-          
-        } else {
+        if (playBtn.textContent === '▶️') {
           // Start playing
-          if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-          }
-          
-          isPlaying = true;
+          await audioElement.play();
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing live radio!', 'success');
           
-          // Start continuous audio if we have data
-          if (audioQueue.length > 0) {
-            console.log(`🚀 Starting continuous audio with ${audioQueue.length} chunks`);
-            startContinuousAudio();
-          }
+        } else {
+          // Pause playing
+          audioElement.pause();
+          playBtn.textContent = '▶️';
+          updateStatus('⏸️ Audio paused', 'success');
         }
         
       } catch (error) {
-        console.error('❌ Audio toggle error:', error);
-        updateStatus('❌ Audio error: ' + error.message, 'error');
+        console.error('❌ Playback error:', error);
+        updateStatus('❌ Playback error: ' + error.message, 'error');
       }
     }
 
     // Set volume
     function setVolume(value) {
-      const volume = value / 100;
-      if (gainNode) {
-        gainNode.gain.value = volume;
+      currentVolume = value / 100;
+      if (audioElement) {
+        audioElement.volume = currentVolume;
       }
       volumeDisplay.textContent = value + '%';
     }
 
     // Stop radio
     function stopRadio() {
-      isStreaming = false;
-      isPlaying = false;
-      isPlayingAudio = false;
+      isConnected = false;
       
-      // Clear buffer
-      audioQueue = [];
-      
-      // Close Web Audio Context
-      if (audioContext) {
-        audioContext.close();
-        audioContext = null;
+      // Stop audio
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+        audioElement = null;
       }
       
       // Close WebSocket
       if (websocket) {
         websocket.close();
+        websocket = null;
       }
       
-      // Reset variables
-      gainNode = null;
+      // Reset counters
       chunkCount = 0;
       totalBytes = 0;
       
@@ -555,7 +452,7 @@
       updateStatus('⏹️ Radio stopped');
       connectionStat.textContent = '❌';
       
-      console.log('⏹️ PCM radio streaming stopped');
+      console.log('⏹️ Radio streaming stopped');
     }
 
     // Update status display
@@ -576,15 +473,9 @@
       return Math.round(bytes / Math.pow(k, i)) + ' ' + sizes[i];
     }
 
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-      if (websocket) websocket.close();
-      if (audioContext) audioContext.close();
-    });
-
     // Initialize
     window.addEventListener('load', () => {
-      console.log('📻 PCM FM Radio Player loaded');
+      console.log('📻 Simple FM Radio Player loaded');
     });
   </script>
 </body>
