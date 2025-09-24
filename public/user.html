@@ -80,7 +80,7 @@
     <h1>🎧 Natural Voice FM Radio</h1>
     
     <div class="status" id="status">
-      Connecting to natural voice stream...
+      🔊 Click "Enable Audio" to start listening
     </div>
     
     <div class="volume-control">
@@ -104,6 +104,7 @@
 
   <script>
     let globalVolume = 1.0;
+    let ws = null;
     
     // Update volume display
     const volumeSlider = document.getElementById('volume');
@@ -118,9 +119,13 @@
       // User interaction to enable autoplay
       const tempAudio = new Audio();
       tempAudio.play().then(() => {
-        document.getElementById('status').textContent = "🎵 Audio enabled - listening for natural voice";
+        document.getElementById('status').textContent = "🎵 Audio enabled - connecting...";
         document.getElementById('status').className = "status success";
         console.log('✅ Audio enabled successfully');
+        
+        // Start WebSocket connection after audio is enabled
+        connectWebSocket();
+        
       }).catch((error) => {
         document.getElementById('status').textContent = "❌ Please enable audio in browser settings";
         document.getElementById('status').className = "status error";
@@ -128,19 +133,72 @@
       });
     }
     
+    function connectWebSocket() {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}`;
+      
+      console.log('Connecting to:', wsUrl);
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = 'blob';
+      
+      ws.onopen = () => {
+        console.log('✅ WebSocket connected');
+        document.getElementById('status').textContent = "🎵 Connected - listening for audio...";
+        document.getElementById('status').className = "status success";
+      };
+      
+      ws.onmessage = (event) => {
+        console.log('📡 Received audio data:', event.data.size, 'bytes');
+        
+        try {
+          // Create audio from WebM blob
+          const audioBlob = new Blob([event.data], { type: 'audio/webm;codecs=opus' });
+          const audioUrl = URL.createObjectURL(audioBlob);
+          
+          // Play audio
+          const tempAudio = new Audio(audioUrl);
+          tempAudio.volume = globalVolume;
+          
+          tempAudio.play().then(() => {
+            document.getElementById('status').textContent = "🎵 Playing natural voice audio";
+            document.getElementById('status').className = "status success";
+          }).catch(e => {
+            console.error('Playback error:', e);
+            document.getElementById('status').textContent = "⚠️ Audio playback issue";
+          });
+          
+          // Cleanup
+          tempAudio.addEventListener('ended', () => {
+            URL.revokeObjectURL(audioUrl);
+          });
+          
+        } catch (error) {
+          console.error('Audio processing error:', error);
+          document.getElementById('status').textContent = "❌ Audio processing failed";
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('❌ WebSocket disconnected');
+        document.getElementById('status').textContent = "🔌 Connection lost - reconnecting...";
+        document.getElementById('status').className = "status error";
+        
+        // Reconnect after 2 seconds
+        setTimeout(connectWebSocket, 2000);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        document.getElementById('status').textContent = "❌ Connection error";
+        document.getElementById('status').className = "status error";
+      };
+    }
+    
     // Debug WebSocket connection
     window.addEventListener('load', () => {
       console.log('🎧 User page loaded');
-      setTimeout(() => {
-        if (typeof ws !== 'undefined' && ws) {
-          console.log('WebSocket state:', ws.readyState);
-        } else {
-          console.log('❌ WebSocket not initialized');
-        }
-      }, 2000);
+      document.getElementById('status').textContent = "🔊 Click 'Enable Audio' to start listening";
     });
   </script>
-  
-  <script src="script-natural.js"></script>
 </body>
 </html>
