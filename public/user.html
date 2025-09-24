@@ -240,16 +240,16 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // MediaSource-based continuous streaming
-    let mediaSource = null;
-    let sourceBuffer = null;
+    // Continuous audio buffer system
     let audioQueue = [];
-    let isAppending = false;
     let audioElement = null;
+    let isBuffering = false;
+    let bufferSize = 0;
+    let lastPlayTime = 0;
     
-    // Audio scheduling for smooth playback
-    let nextStartTime = 0;
-    let audioBufferQueue = [];
+    // Audio worklet for smooth streaming
+    let audioWorklet = null;
+    let pcmBuffer = new Float32Array(0);
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -415,43 +415,72 @@
     }
 
     // Process audio queue smoothly without breaking
-    // Direct Web Audio API streaming with proper scheduling
+    // Initialize global PCM buffer
+    window.pcmBuffer = new Float32Array(0);
+    
+    // Robust continuous audio processing with buffer management
     function processIncomingAudio(pcmBuffer) {
       if (!audioContext || !gainNode || !isPlaying) return;
       
       try {
         const pcmData = new Int16Array(pcmBuffer);
-        const floatData = new Float32Array(pcmData.length);
         
-        // Convert Int16 to Float32 for Web Audio API
+        // Add to continuous buffer
+        const floatData = new Float32Array(pcmData.length);
         for (let i = 0; i < pcmData.length; i++) {
           floatData[i] = pcmData[i] / 32768.0;
         }
         
-        // Create audio buffer
-        const audioBuffer = audioContext.createBuffer(1, floatData.length, 48000);
-        audioBuffer.getChannelData(0).set(floatData);
+        // Combine with existing buffer for seamless playback
+        const newBuffer = new Float32Array(window.pcmBuffer.length + floatData.length);
+        newBuffer.set(window.pcmBuffer);
+        newBuffer.set(floatData, window.pcmBuffer.length);
+        window.pcmBuffer = newBuffer;
         
-        // Schedule playback to prevent gaps
+        // Play chunks when we have enough buffered
+        if (window.pcmBuffer.length >= 4800) { // ~100ms at 48kHz
+          playBufferedAudio();
+        }
+        
+        console.log(`🎵 Buffered audio: ${pcmData.length} samples, total: ${window.pcmBuffer.length}`);
+        
+      } catch (error) {
+        console.error('❌ Buffer management error:', error);
+      }
+    }
+    
+    // Play buffered audio in smooth chunks
+    function playBufferedAudio() {
+      if (!audioContext || !gainNode || window.pcmBuffer.length < 4800) return;
+      
+      try {
+        // Take a chunk from buffer
+        const chunkSize = 4800; // 100ms at 48kHz
+        const chunk = window.pcmBuffer.slice(0, chunkSize);
+        window.pcmBuffer = window.pcmBuffer.slice(chunkSize);
+        
+        // Create and schedule audio buffer
+        const audioBuffer = audioContext.createBuffer(1, chunk.length, 48000);
+        audioBuffer.getChannelData(0).set(chunk);
+        
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(gainNode);
         
+        // Smooth scheduling with overlap prevention
         const currentTime = audioContext.currentTime;
-        const duration = audioBuffer.duration;
+        const startTime = Math.max(currentTime + 0.01, lastPlayTime);
         
-        // Calculate when to start this chunk
-        if (nextStartTime <= currentTime) {
-          nextStartTime = currentTime;
+        source.start(startTime);
+        lastPlayTime = startTime + audioBuffer.duration;
+        
+        // Continue processing if more data available
+        if (window.pcmBuffer.length >= 4800) {
+          setTimeout(playBufferedAudio, 50); // Overlap processing
         }
         
-        source.start(nextStartTime);
-        nextStartTime += duration;
-        
-        console.log(`🎵 Scheduled audio: ${pcmData.length} samples at ${nextStartTime.toFixed(3)}s`);
-        
       } catch (error) {
-        console.error('❌ Audio scheduling error:', error);
+        console.error('❌ Audio playback error:', error);
       }
     }
 
@@ -492,8 +521,9 @@
             await audioContext.resume();
           }
           
-          // Reset timing for new session
-          nextStartTime = 0;
+          // Reset timing and buffer for new session
+          lastPlayTime = 0;
+          window.pcmBuffer = new Float32Array(0);
           
           isPlaying = true;
           playBtn.textContent = '⏸️';
@@ -526,8 +556,11 @@
         audioContext.suspend();
       }
       
-      // Clear buffer
+      // Clear buffers
       audioQueue = [];
+      if (typeof window.pcmBuffer !== 'undefined') {
+        window.pcmBuffer = new Float32Array(0);
+      }
       
       // Close WebSocket
       if (websocket) {
