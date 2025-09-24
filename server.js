@@ -1,4 +1,4 @@
-// Natural voice quality FM radio server
+// FM radio server supporting multiple audio formats
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -7,11 +7,11 @@ const path = require("path");
 const app = express();
 const server = http.createServer(app);
 
-// WebSocket server optimized for natural voice quality
+// WebSocket server for audio streaming
 const wss = new WebSocket.Server({ 
   server,
-  perMessageDeflate: false, // No compression for natural audio
-  maxPayload: 1024 * 1024   // 1MB max for WebM chunks
+  perMessageDeflate: false, // No compression for audio
+  maxPayload: 1024 * 1024   // 1MB max for audio chunks
 });
 
 let clients = [];
@@ -21,11 +21,12 @@ let serverStartTime = Date.now();
 wss.on("connection", (ws, req) => {
   clients.push(ws);
   console.log(`🎵 New client connected (${clients.length} total)`);
+  console.log(`📍 Client from: ${req.socket.remoteAddress}:${req.socket.remotePort}`);
 
   ws.on("message", (audioData) => {
     broadcastCount++;
     
-    // Broadcast natural audio to all other clients
+    // Broadcast audio to all other clients
     let successCount = 0;
     clients = clients.filter(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
@@ -42,7 +43,7 @@ wss.on("connection", (ws, req) => {
     });
     
     if (broadcastCount % 100 === 0) {
-      console.log(`🎵 Natural voice broadcast #${broadcastCount} to ${successCount} clients`);
+      console.log(`🎵 Audio broadcast #${broadcastCount} to ${successCount} clients`);
     }
   });
 
@@ -62,7 +63,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // Root redirect to user page
 app.get('/', (req, res) => {
-  res.redirect('/user-natural.html');
+  res.redirect('/user.html');
 });
 
 // Health check
@@ -73,8 +74,7 @@ app.get('/health', (req, res) => {
     clients: clients.length,
     uptime: uptime,
     broadcasts: broadcastCount,
-    audioQuality: 'natural-voice',
-    format: 'WebM/Opus'
+    audioFormat: 'PCM/Raw'
   });
 });
 
@@ -82,9 +82,9 @@ const PORT = process.env.PORT || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
-  console.log(`🎵 Natural Voice FM Server running on ${HOST}:${PORT}`);
-  console.log(`📻 Audio: WebM/Opus format, optimized for natural voice`);
-  console.log(`🖥️ Screen Admin: http://localhost:${PORT}/screen-admin.html`);
-  console.log(`🎧 User Player: http://localhost:${PORT}/user-natural.html`);
+  console.log(`🎵 FM Radio Server running on ${HOST}:${PORT}`);
+  console.log(`📻 Audio: PCM format for low-latency streaming`);
+  console.log(`🖥️ Admin: http://localhost:${PORT}/admin.html`);
+  console.log(`🎧 User: http://localhost:${PORT}/user.html`);
   console.log(`💚 Health: http://localhost:${PORT}/health`);
 });
