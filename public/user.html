@@ -19,7 +19,17 @@
     .container {
       max-width: 600px;
       margin: 0 auto;
-      ba          // Check if we're resuming from pause
+      ba                    // Check if we're resuming from pause
+          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
+            console.log('🔄 Stream resumed - restarting audio system');
+            streamState = 'restarting';
+            
+            // Complete system reset for clean restart
+            resetAudioSystem();
+            
+            streamState = 'active';
+            updateStatus('🔴 LIVE - Stream resumed successfully!', 'success');
+          } we're resuming from pause
           if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
             console.log('🔄 Stream resumed - restarting audio system');
             streamState = 'restarting';
