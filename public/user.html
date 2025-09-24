@@ -247,6 +247,10 @@
     let isAppending = false;
     let audioElement = null;
     
+    // Audio scheduling for smooth playback
+    let nextStartTime = 0;
+    let audioBufferQueue = [];
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -379,7 +383,7 @@
       });
     }
 
-    // Handle incoming PCM data - queue and process smoothly
+    // Handle incoming PCM data - direct real-time processing
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
@@ -387,12 +391,12 @@
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(audioQueue.length * 10, 100) + '%';
+      bufferStat.textContent = '🔴 LIVE';
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
+      console.log(`📡 Direct PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
       
-      // Add to queue for smooth processing
-      audioQueue.push(arrayBuffer);
+      // Process audio immediately for zero latency
+      processIncomingAudio(arrayBuffer);
       
       // Animate visualizer
       if (isPlaying) {
@@ -406,23 +410,12 @@
       
       // Auto-enable play after receiving some data
       if (chunkCount === 2 && !isPlaying) {
-        updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
-      }
-      
-      // Start processing if ready
-      if (isPlaying && !isProcessing && audioQueue.length >= 2) {
-        processAudioQueue();
-      }
-      
-      // Keep queue manageable
-      if (audioQueue.length > 10) {
-        console.log('🗑️ Queue too large, trimming');
-        audioQueue = audioQueue.slice(-8);
+        updateStatus('🎵 Ready! Click ▶️ to hear live audio', 'success');
       }
     }
 
     // Process audio queue smoothly without breaking
-    // Direct Web Audio API streaming without buffering
+    // Direct Web Audio API streaming with proper scheduling
     function processIncomingAudio(pcmBuffer) {
       if (!audioContext || !gainNode || !isPlaying) return;
       
@@ -435,54 +428,31 @@
           floatData[i] = pcmData[i] / 32768.0;
         }
         
-        // Create and play audio buffer immediately
+        // Create audio buffer
         const audioBuffer = audioContext.createBuffer(1, floatData.length, 48000);
         audioBuffer.getChannelData(0).set(floatData);
         
+        // Schedule playback to prevent gaps
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(gainNode);
-        source.start(audioContext.currentTime);
         
-        console.log(`🎵 Direct audio: ${pcmData.length} samples`);
+        const currentTime = audioContext.currentTime;
+        const duration = audioBuffer.duration;
+        
+        // Calculate when to start this chunk
+        if (nextStartTime <= currentTime) {
+          nextStartTime = currentTime;
+        }
+        
+        source.start(nextStartTime);
+        nextStartTime += duration;
+        
+        console.log(`🎵 Scheduled audio: ${pcmData.length} samples at ${nextStartTime.toFixed(3)}s`);
         
       } catch (error) {
-        console.error('❌ Direct audio error:', error);
+        console.error('❌ Audio scheduling error:', error);
       }
-    }
-
-    // Create WAV blob from Int16 PCM data
-    function createWavBlobFromInt16(pcmData) {
-      const length = pcmData.length;
-      const buffer = new ArrayBuffer(44 + length * 2);
-      const view = new DataView(buffer);
-      
-      // WAV header
-      const writeString = (offset, string) => {
-        for (let i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      };
-      
-      writeString(0, 'RIFF');
-      view.setUint32(4, 36 + length * 2, true);
-      writeString(8, 'WAVE');
-      writeString(12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true); // Mono
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * 2, true);
-      view.setUint16(32, 2, true);
-      view.setUint16(34, 16, true);
-      writeString(36, 'data');
-      view.setUint32(40, length * 2, true);
-      
-      // Copy PCM data
-      const pcmView = new Int16Array(buffer, 44);
-      pcmView.set(pcmData);
-      
-      return new Blob([buffer], { type: 'audio/wav' });
     }
 
     // Toggle audio playback
@@ -496,24 +466,38 @@
         if (isPlaying) {
           // Stop playing
           isPlaying = false;
-          isProcessing = false;
           playBtn.textContent = '▶️';
           updateStatus('⏸️ Audio paused', 'success');
           
-          if (audioElement) {
-            audioElement.pause();
+          if (audioContext) {
+            await audioContext.suspend();
           }
           
         } else {
-          // Start playing
+          // Start playing - initialize Web Audio API
+          if (!audioContext || audioContext.state === 'closed') {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({
+              sampleRate: 48000,
+              latencyHint: 'interactive'
+            });
+            
+            gainNode = audioContext.createGain();
+            gainNode.connect(audioContext.destination);
+            gainNode.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
+            
+            console.log('🎧 Web Audio API initialized for real-time streaming');
+          }
+          
+          if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+          }
+          
+          // Reset timing for new session
+          nextStartTime = 0;
+          
           isPlaying = true;
           playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing live radio!', 'success');
-          
-          // Start processing if we have data
-          if (audioQueue.length > 0) {
-            processAudioQueue();
-          }
+          updateStatus('🔴 LIVE - Real-time audio streaming!', 'success');
         }
         
       } catch (error) {
@@ -523,19 +507,11 @@
     }
 
     // Set volume
+    // Set volume for Web Audio API
     function setVolume(value) {
       const volume = value / 100;
-      if (audioElement) {
-        audioElement.volume = volume;
-      }
-      volumeDisplay.textContent = value + '%';
-    }
-
-    // Set volume
-    function setVolume(value) {
-      const volume = value / 100;
-      if (audioElement) {
-        audioElement.volume = volume;
+      if (gainNode) {
+        gainNode.gain.value = volume;
       }
       volumeDisplay.textContent = value + '%';
     }
@@ -544,13 +520,10 @@
     function stopRadio() {
       isStreaming = false;
       isPlaying = false;
-      isProcessing = false;
       
-      // Stop and cleanup audio element
-      if (audioElement) {
-        audioElement.pause();
-        audioElement.src = '';
-        audioElement = null;
+      // Stop and cleanup audio context
+      if (audioContext) {
+        audioContext.suspend();
       }
       
       // Clear buffer
@@ -575,7 +548,7 @@
       updateStatus('⏹️ Radio stopped');
       connectionStat.textContent = '❌';
       
-      console.log('⏹️ Smooth radio streaming stopped');
+      console.log('⏹️ Real-time radio streaming stopped');
     }
 
     // Update status display
