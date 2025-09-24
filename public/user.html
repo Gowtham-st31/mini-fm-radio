@@ -246,6 +246,8 @@
     let sampleRate = 48000;
     let scheduleAheadTime = 0.1; // 100ms ahead
     let nextNoteTime = 0.0;
+    let lastChunkTime = 0;
+    let chunkTimeout = null;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -370,6 +372,11 @@
             console.log('❌ WebSocket disconnected');
             updateStatus('❌ Connection lost', 'error');
             connectionStat.textContent = '❌';
+            
+            // Clear timeouts
+            if (chunkTimeout) {
+              clearTimeout(chunkTimeout);
+            }
           };
           
           websocket.onerror = (error) => {
@@ -390,6 +397,18 @@
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
+      lastChunkTime = Date.now();
+      
+      // Clear any existing timeout
+      if (chunkTimeout) {
+        clearTimeout(chunkTimeout);
+      }
+      
+      // Set timeout to detect admin restart
+      chunkTimeout = setTimeout(() => {
+        console.log('🔄 No data for 3 seconds, admin might have restarted');
+        resetAudioState();
+      }, 3000);
       
       // Update stats
       chunkStat.textContent = chunkCount;
@@ -427,11 +446,43 @@
       }
     }
 
+    // Reset audio state when admin restarts
+    function resetAudioState() {
+      console.log('🔄 Resetting audio state...');
+      
+      // Clear queue and reset timing
+      audioQueue = [];
+      nextNoteTime = 0;
+      
+      if (isPlaying && audioContext) {
+        // Reset next note time to current time
+        nextNoteTime = audioContext.currentTime;
+        updateStatus('🔄 Admin restarted - reconnecting...', 'streaming');
+        
+        // Visual feedback
+        bufferStat.textContent = '0%';
+        
+        // Continue scheduling after brief pause
+        setTimeout(() => {
+          if (isPlaying) {
+            updateStatus('🎵 Playing live radio!', 'success');
+            scheduleAudio();
+          }
+        }, 500);
+      }
+    }
+
     // Schedule and play audio continuously
     function scheduleAudio() {
       // Look ahead and schedule audio
       while (nextNoteTime < audioContext.currentTime + scheduleAheadTime && audioQueue.length > 0) {
         playAudioAtTime(nextNoteTime);
+      }
+      
+      // Check if we're falling behind (no audio scheduled recently)
+      if (nextNoteTime < audioContext.currentTime - 0.5 && audioQueue.length > 0) {
+        console.log('🔄 Audio fell behind, resetting timing');
+        nextNoteTime = audioContext.currentTime;
       }
       
       // Continue scheduling if playing
@@ -526,6 +577,14 @@
       
       // Clear buffer
       audioQueue = [];
+      nextNoteTime = 0;
+      lastChunkTime = 0;
+      
+      // Clear timeouts
+      if (chunkTimeout) {
+        clearTimeout(chunkTimeout);
+        chunkTimeout = null;
+      }
       
       // Close Web Audio Context
       if (audioContext) {
