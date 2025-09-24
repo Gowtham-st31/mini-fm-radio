@@ -240,12 +240,12 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // PCM buffer management
-    let pcmBuffer = [];
-    let isProcessingAudio = false;
+    // Simple continuous audio approach
+    let audioQueue = [];
+    let currentSource = null;
     let sampleRate = 48000;
-    let nextStartTime = 0;
-    let audioContextStartTime = 0;
+    let scheduleAheadTime = 0.1; // 100ms ahead
+    let nextNoteTime = 0.0;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -321,7 +321,8 @@
         isStreaming = true;
         chunkCount = 0;
         totalBytes = 0;
-        pcmBuffer = [];
+        audioQueue = [];
+        nextNoteTime = 0;
         
         // Update UI
         connectBtn.style.display = 'none';
@@ -393,9 +394,9 @@
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(pcmBuffer.length * 5, 100) + '%';
+      bufferStat.textContent = Math.min(audioQueue.length * 5, 100) + '%';
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, buffer: ${pcmBuffer.length}`);
+      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
       
       // Convert ArrayBuffer to Float32Array for audio processing
       const pcmData = new Int16Array(arrayBuffer);
@@ -406,8 +407,8 @@
         floatData[i] = pcmData[i] / 32768.0;
       }
       
-      // Add to buffer
-      pcmBuffer.push(floatData);
+      // Add to audio queue
+      audioQueue.push(floatData);
       
       // Animate visualizer with actual audio data
       if (isPlaying) {
@@ -419,46 +420,33 @@
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Start processing when we have enough buffer
-      if (isPlaying && !isProcessingAudio && pcmBuffer.length >= 5) {
-        processAudioBuffer();
-      }
-      
-      // Keep buffer reasonable but never too small
-      if (pcmBuffer.length > 25) {
-        console.log('🗑️ Buffer too large, trimming');
-        pcmBuffer = pcmBuffer.slice(-20);
+      // Keep queue manageable
+      if (audioQueue.length > 20) {
+        console.log('🗑️ Queue too large, trimming');
+        audioQueue = audioQueue.slice(-15);
       }
     }
 
-    // Process audio buffer with precise timing
-    async function processAudioBuffer() {
-      if (isProcessingAudio || !isPlaying || pcmBuffer.length < 2) return;
+    // Schedule and play audio continuously
+    function scheduleAudio() {
+      // Look ahead and schedule audio
+      while (nextNoteTime < audioContext.currentTime + scheduleAheadTime && audioQueue.length > 0) {
+        playAudioAtTime(nextNoteTime);
+      }
       
-      isProcessingAudio = true;
+      // Continue scheduling if playing
+      if (isPlaying) {
+        requestAnimationFrame(scheduleAudio);
+      }
+    }
+
+    // Play single audio chunk at specific time
+    function playAudioAtTime(time) {
+      if (audioQueue.length === 0) return;
+      
+      const audioData = audioQueue.shift();
       
       try {
-        // Initialize timing on first run
-        if (nextStartTime === 0) {
-          nextStartTime = audioContext.currentTime;
-          audioContextStartTime = audioContext.currentTime;
-        }
-        
-        // Only process if we have sufficient buffer
-        if (pcmBuffer.length < 3) {
-          console.log('⏳ Waiting for more buffer...');
-          isProcessingAudio = false;
-          setTimeout(() => {
-            if (isPlaying && pcmBuffer.length >= 3) {
-              processAudioBuffer();
-            }
-          }, 50);
-          return;
-        }
-        
-        // Take one chunk at a time for consistent timing
-        const audioData = pcmBuffer.shift();
-        
         // Create audio buffer
         const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
@@ -469,33 +457,20 @@
         source.buffer = audioBuffer;
         source.connect(gainNode);
         
-        // Schedule at precise time
-        source.start(nextStartTime);
+        // Schedule playback
+        if (time < audioContext.currentTime) {
+          time = audioContext.currentTime; // Catch up if behind
+        }
         
-        // Calculate next start time
-        const duration = audioBuffer.duration;
-        nextStartTime += duration;
+        source.start(time);
         
-        console.log(`🎵 Scheduled audio at ${nextStartTime.toFixed(3)}s, duration: ${duration.toFixed(3)}s, buffer: ${pcmBuffer.length}`);
+        // Update next time
+        nextNoteTime = time + audioBuffer.duration;
         
-        // Schedule next processing
-        const scheduleDelay = Math.max((duration * 1000) - 50, 10);
-        setTimeout(() => {
-          isProcessingAudio = false;
-          if (isPlaying && pcmBuffer.length > 0) {
-            processAudioBuffer();
-          }
-        }, scheduleDelay);
+        console.log(`🎵 Scheduled at ${time.toFixed(3)}s, next: ${nextNoteTime.toFixed(3)}s, queue: ${audioQueue.length}`);
         
       } catch (error) {
-        console.error('❌ Audio processing error:', error);
-        isProcessingAudio = false;
-        
-        // Reset timing and retry
-        nextStartTime = audioContext.currentTime;
-        if (isPlaying && pcmBuffer.length > 0) {
-          setTimeout(processAudioBuffer, 100);
-        }
+        console.error('❌ Audio play error:', error);
       }
     }
 
@@ -510,8 +485,6 @@
         if (isPlaying) {
           // Stop playing
           isPlaying = false;
-          isProcessingAudio = false;
-          nextStartTime = 0;
           playBtn.textContent = '▶️';
           updateStatus('⏸️ Audio paused', 'success');
           
@@ -522,16 +495,12 @@
           }
           
           isPlaying = true;
-          nextStartTime = 0; // Reset timing
+          nextNoteTime = audioContext.currentTime;
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing live radio!', 'success');
           
-          // Wait for buffer to build up before starting
-          if (pcmBuffer.length >= 5) {
-            processAudioBuffer();
-          } else {
-            updateStatus('🎵 Buffering audio...', 'streaming');
-          }
+          // Start the audio scheduling loop
+          scheduleAudio();
         }
         
       } catch (error) {
@@ -556,9 +525,7 @@
       isProcessingAudio = false;
       
       // Clear buffer
-      pcmBuffer = [];
-      isProcessingAudio = false;
-      nextStartTime = 0;
+      audioQueue = [];
       
       // Close Web Audio Context
       if (audioContext) {
