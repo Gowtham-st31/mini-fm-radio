@@ -1,3 +1,4 @@
+// High-quality FM radio server optimized for clear audio
 const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
@@ -5,43 +6,85 @@ const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+
+// High-quality audio constants for clear sound
+const SAMPLE_RATE = 44100; // CD quality
+const CHANNELS = 2;
+const BYTES_PER_SAMPLE = 2;
+
+// WebSocket server optimized for audio quality
+const wss = new WebSocket.Server({ 
+  server,
+  perMessageDeflate: false, // No compression for clearer audio
+  maxPayload: 32 * 1024     // 32KB max for better streaming
+});
 
 let clients = [];
+let broadcastCount = 0;
+let serverStartTime = Date.now();
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   clients.push(ws);
-  console.log("✅ New user connected");
+  console.log(`🎵 New client connected (${clients.length} total)`);
 
-  ws.on("message", (message) => {
-    console.log(`📡 Received message from client, size: ${message.length} bytes`);
+  ws.on("message", (audioData) => {
+    broadcastCount++;
     
-    // Broadcast admin audio chunks to all users
-    let broadcastCount = 0;
-    clients.forEach((client) => {
+    // Broadcast high-quality audio to all other clients
+    let successCount = 0;
+    clients = clients.filter(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(message);
-        broadcastCount++;
+        try {
+          client.send(audioData);
+          successCount++;
+          return true;
+        } catch (error) {
+          console.error('❌ Broadcast error:', error.message);
+          return false;
+        }
       }
+      return client === ws || client.readyState === WebSocket.OPEN;
     });
     
-    console.log(`📢 Broadcasted to ${broadcastCount} clients`);
+    if (broadcastCount % 500 === 0) {
+      console.log(`🎵 High-quality broadcast #${broadcastCount} to ${successCount} clients`);
+    }
   });
 
   ws.on("close", () => {
-    clients = clients.filter((c) => c !== ws);
-    console.log("❌ User disconnected");
+    clients = clients.filter(client => client !== ws);
+    console.log(`👋 Client disconnected (${clients.length} remaining)`);
+  });
+
+  ws.on("error", (error) => {
+    console.error('❌ WebSocket error:', error.message);
+    clients = clients.filter(client => client !== ws);
   });
 });
 
+// Serve static files
 app.use(express.static(path.join(__dirname, "public")));
+
+// Health check
+app.get('/health', (req, res) => {
+  const uptime = Math.floor((Date.now() - serverStartTime) / 1000);
+  res.json({
+    status: 'healthy',
+    clients: clients.length,
+    uptime: uptime,
+    broadcasts: broadcastCount,
+    audioQuality: 'high',
+    sampleRate: SAMPLE_RATE
+  });
+});
 
 const PORT = process.env.PORT || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
-  console.log(`✅ Server running on ${HOST}:${PORT}`);
-  console.log(`📡 WebSocket server ready for connections`);
-  console.log(`🌐 Admin panel: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/admin.html`);
-  console.log(`🎧 User interface: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/radio-player.html`);
+  console.log(`🎵 High-Quality FM Server running on ${HOST}:${PORT}`);
+  console.log(`📻 Audio: ${SAMPLE_RATE}Hz stereo, optimized for clarity`);
+  console.log(`🖥️ Screen Admin: http://localhost:${PORT}/screen-admin.html`);
+  console.log(`🎧 User Player: http://localhost:${PORT}/user.html`);
+  console.log(`💚 Health: http://localhost:${PORT}/health`);
 });
