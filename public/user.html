@@ -19,7 +19,17 @@
     .container {
       max-width: 600px;
       margin: 0 auto;
-      background: rgba(255, 255, 255, 0.1);
+      ba          // Check if we're resuming from pause
+          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
+            console.log('🔄 Stream resumed - restarting audio system');
+            streamState = 'restarting';
+            
+            // Complete system reset for clean restart
+            resetAudioSystem();
+            
+            streamState = 'active';
+            updateStatus('🔴 LIVE - Stream resumed successfully!', 'success');
+          }gba(255, 255, 255, 0.1);
       padding: 40px;
       border-radius: 20px;
       backdrop-filter: blur(10px);
@@ -253,12 +263,14 @@
     let minBufferSize = 2400; // 50ms at 48kHz
     let targetBufferSize = 4800; // 100ms at 48kHz
     
-    // Admin pause/resume detection
-    let silenceDetector = 0;
+    // Admin pause/resume detection with stream restart handling
+    let streamState = 'active'; // 'active', 'paused', 'restarting'
     let lastAudioLevel = 0;
-    let silenceThreshold = 0.001; // Very low audio level
+    let silenceThreshold = 0.001;
     let silenceDuration = 0;
-    let maxSilenceBeforeReset = 1000; // 1 second of silence triggers reset
+    let maxSilenceBeforeReset = 500; // 0.5 seconds of silence
+    let consecutiveAudioChunks = 0;
+    let lastChunkTime = 0;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -427,12 +439,54 @@
     // Initialize global PCM buffer with automatic recovery
     window.pcmBuffer = new Float32Array(0);
     
-    // Adaptive audio processing with gap detection and recovery
+    // Complete audio system reset for clean restart
+    function resetAudioSystem() {
+      try {
+        console.log('🔧 Resetting audio system...');
+        
+        // Stop current scheduling
+        if (audioScheduler) {
+          clearInterval(audioScheduler);
+          audioScheduler = null;
+        }
+        
+        // Clear all buffers
+        window.pcmBuffer = new Float32Array(0);
+        nextPlayTime = 0;
+        
+        // Reset audio context timing
+        if (audioContext && audioContext.state === 'running') {
+          nextPlayTime = audioContext.currentTime + 0.1; // Fresh start with small delay
+        }
+        
+        // Reset stream state variables
+        silenceDuration = 0;
+        consecutiveAudioChunks = 0;
+        lastAudioLevel = 0;
+        
+        // Restart scheduling if audio is playing
+        if (isPlaying && audioContext && audioContext.state === 'running') {
+          audioScheduler = setInterval(() => {
+            if (isPlaying && window.pcmBuffer.length >= minBufferSize) {
+              scheduleAudioPlayback();
+            }
+          }, 25);
+        }
+        
+        console.log('✅ Audio system reset complete');
+        
+      } catch (error) {
+        console.error('❌ Audio reset error:', error);
+      }
+    }
+    
+    // Adaptive audio processing with stream restart detection
     function processIncomingAudio(pcmBufferData) {
       if (!audioContext || !gainNode || !isPlaying) return;
       
       try {
         const pcmData = new Int16Array(pcmBufferData);
+        const currentTime = Date.now();
         
         // Convert to float with better precision
         const floatData = new Float32Array(pcmData.length);
@@ -443,48 +497,69 @@
           maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
         }
         
-        // Detect admin pause/resume by monitoring audio levels
+        // Detect stream interruption and restart
+        const timeSinceLastChunk = currentTime - lastChunkTime;
+        lastChunkTime = currentTime;
+        
         if (maxAmplitude < silenceThreshold) {
-          silenceDuration += 50; // Approximate chunk duration in ms
+          // Silence detected
+          silenceDuration += Math.min(timeSinceLastChunk, 100);
+          consecutiveAudioChunks = 0;
           
-          if (silenceDuration > maxSilenceBeforeReset) {
-            console.log('🔇 Admin paused detected - preparing for reset');
-            silenceDetector = 1; // Mark for reset on next audio
+          if (silenceDuration > maxSilenceBeforeReset && streamState !== 'paused') {
+            console.log('🔇 Stream paused - stopping audio scheduling');
+            streamState = 'paused';
+            
+            // Stop all scheduled audio immediately
+            if (audioScheduler) {
+              clearInterval(audioScheduler);
+              audioScheduler = null;
+            }
+            
+            // Clear buffer to prevent stale audio
+            window.pcmBuffer = new Float32Array(0);
+            nextPlayTime = 0;
+            
+            updateStatus('⏸️ Admin paused - waiting for resume...', 'streaming');
           }
         } else {
-          // Audio detected - check if we need to reset after silence
-          if (silenceDetector === 1) {
-            console.log('🔄 Admin resumed - resetting audio timing');
+          // Audio detected
+          consecutiveAudioChunks++;
+          
+          // Check if we're resuming from pause
+          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
+            console.log('🔄 Stream resumed - restarting audio system');
+            streamState = 'restarting';
             
-            // Clear accumulated buffer and reset timing
-            window.pcmBuffer = new Float32Array(0);
-            nextPlayTime = audioContext.currentTime + 0.1;
-            silenceDetector = 0;
+            // Complete system reset for clean restart
+            await resetAudioSystem();
             
-            updateStatus('🔄 Admin resumed - audio reset', 'streaming');
+            streamState = 'active';
+            updateStatus('� LIVE - Stream resumed successfully!', 'success');
           }
           
-          silenceDuration = 0; // Reset silence counter
+          silenceDuration = 0;
         }
         
         lastAudioLevel = maxAmplitude;
         
-        // Add to continuous buffer
-        const newBuffer = new Float32Array(window.pcmBuffer.length + floatData.length);
-        newBuffer.set(window.pcmBuffer);
-        newBuffer.set(floatData, window.pcmBuffer.length);
-        window.pcmBuffer = newBuffer;
+        // Only process audio if stream is active
+        if (streamState === 'active') {
+          // Add to continuous buffer
+          const newBuffer = new Float32Array(window.pcmBuffer.length + floatData.length);
+          newBuffer.set(window.pcmBuffer);
+          newBuffer.set(floatData, window.pcmBuffer.length);
+          window.pcmBuffer = newBuffer;
+          
+          // Start/continue playback
+          scheduleAudioPlayback();
+        }
         
-        // Start/continue playback with adaptive scheduling
-        scheduleAudioPlayback();
-        
-        console.log(`🔄 Audio buffer: ${floatData.length} new, ${window.pcmBuffer.length} total, level: ${maxAmplitude.toFixed(4)}`);
+        console.log(`🎵 Audio: ${floatData.length} samples, level: ${maxAmplitude.toFixed(4)}, state: ${streamState}`);
         
       } catch (error) {
         console.error('❌ Audio processing error:', error);
-        // Reset on error to prevent accumulation
-        window.pcmBuffer = new Float32Array(0);
-        nextPlayTime = 0;
+        resetAudioSystem();
       }
     }
     
@@ -574,10 +649,12 @@
           nextPlayTime = audioContext.currentTime + 0.1; // Small initial delay
           window.pcmBuffer = new Float32Array(0);
           
-          // Reset pause detection system
-          silenceDetector = 0;
+          // Reset stream state and detection system
+          streamState = 'active';
           silenceDuration = 0;
+          consecutiveAudioChunks = 0;
           lastAudioLevel = 0;
+          lastChunkTime = Date.now();
           
           // Start continuous scheduling monitor
           if (audioScheduler) clearInterval(audioScheduler);
@@ -631,10 +708,12 @@
       }
       nextPlayTime = 0;
       
-      // Reset pause detection
-      silenceDetector = 0;
+      // Reset stream state and detection
+      streamState = 'active';
       silenceDuration = 0;
+      consecutiveAudioChunks = 0;
       lastAudioLevel = 0;
+      lastChunkTime = 0;
       
       // Close WebSocket
       if (websocket) {
