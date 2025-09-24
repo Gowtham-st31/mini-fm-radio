@@ -391,7 +391,7 @@
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(pcmBuffer.length * 10, 100) + '%';
+      bufferStat.textContent = Math.min(pcmBuffer.length * 12, 100) + '%';
       
       console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
       
@@ -413,20 +413,20 @@
       }
       
       // Auto-enable play after receiving some data
-      if (chunkCount === 2 && !isPlaying) {
+      if (chunkCount === 3 && !isPlaying) {
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Process audio if playing and buffer has enough data
-      if (isPlaying && !isProcessingAudio && pcmBuffer.length >= 2) {
+      // Start processing if playing and we have enough buffer
+      if (isPlaying && !isProcessingAudio && pcmBuffer.length >= 1) {
         processAudioBuffer();
       }
       
-      // Keep buffer optimal size (prevent too much delay)
-      if (pcmBuffer.length > 10) {
-        // Remove oldest chunks but keep some for smooth playback
-        pcmBuffer = pcmBuffer.slice(-8);
-        console.log('🗑️ Buffer trimmed to prevent latency');
+      // Keep buffer size reasonable to prevent excessive latency
+      if (pcmBuffer.length > 8) {
+        // Keep most recent chunks
+        pcmBuffer = pcmBuffer.slice(-6);
+        console.log('🗑️ Buffer trimmed to prevent excessive latency');
       }
     }
 
@@ -437,48 +437,50 @@
       isProcessingAudio = true;
       
       try {
-        // Process multiple chunks at once for smoother playback
-        const chunksToProcess = Math.min(pcmBuffer.length, 3);
-        const combinedData = [];
+        // Take the next chunk from buffer
+        const audioData = pcmBuffer.shift();
         
-        // Combine multiple chunks
-        for (let i = 0; i < chunksToProcess; i++) {
-          const audioData = pcmBuffer.shift();
-          combinedData.push(...audioData);
-        }
-        
-        if (combinedData.length === 0) {
+        if (!audioData || audioData.length === 0) {
           isProcessingAudio = false;
           return;
         }
         
-        // Create larger audio buffer for smoother playback
-        const audioBuffer = audioContext.createBuffer(1, combinedData.length, sampleRate);
+        // Create audio buffer
+        const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
         
-        // Copy combined PCM data to audio buffer
-        for (let i = 0; i < combinedData.length; i++) {
-          channelData[i] = combinedData[i];
+        // Copy PCM data to audio buffer
+        for (let i = 0; i < audioData.length; i++) {
+          channelData[i] = audioData[i];
         }
         
         // Create and play source
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(gainNode);
-        
-        // Schedule next processing before this ends
-        const duration = audioBuffer.duration * 1000;
         source.start(0);
         
-        console.log(`🎵 Playing combined PCM chunk (${combinedData.length} samples, ${duration.toFixed(1)}ms)`);
+        const duration = audioBuffer.duration * 1000;
+        console.log(`🎵 Playing PCM chunk (${audioData.length} samples, ${duration.toFixed(1)}ms)`);
         
-        // Schedule next processing with overlap to prevent gaps
-        setTimeout(() => {
+        // Schedule next chunk immediately to ensure continuous playback
+        source.onended = () => {
           isProcessingAudio = false;
+          // Immediately process next chunk if available
           if (pcmBuffer.length > 0 && isPlaying) {
-            processAudioBuffer();
+            setTimeout(processAudioBuffer, 10); // Very small delay
           }
-        }, Math.max(duration * 0.7, 50)); // Start next before current ends
+        };
+        
+        // Also set a backup timeout in case onended doesn't fire
+        setTimeout(() => {
+          if (isProcessingAudio) {
+            isProcessingAudio = false;
+            if (pcmBuffer.length > 0 && isPlaying) {
+              processAudioBuffer();
+            }
+          }
+        }, Math.max(duration - 10, 50));
         
       } catch (error) {
         console.error('❌ Audio processing error:', error);
@@ -490,7 +492,7 @@
             if (pcmBuffer.length > 0) {
               processAudioBuffer();
             }
-          }, 100);
+          }, 50);
         }
       }
     }
@@ -519,10 +521,22 @@
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing live radio!', 'success');
           
-          // Start processing if we have data
-          if (pcmBuffer.length > 0) {
+          // Start processing immediately if we have data
+          if (pcmBuffer.length > 0 && !isProcessingAudio) {
+            console.log(`🚀 Starting playback with ${pcmBuffer.length} chunks in buffer`);
             processAudioBuffer();
           }
+          
+          // Also start a backup process loop to ensure continuous playback
+          const ensureContinuousPlayback = () => {
+            if (isPlaying && pcmBuffer.length > 0 && !isProcessingAudio) {
+              processAudioBuffer();
+            }
+            if (isPlaying) {
+              setTimeout(ensureContinuousPlayback, 200); // Check every 200ms
+            }
+          };
+          setTimeout(ensureContinuousPlayback, 200);
         }
         
       } catch (error) {
