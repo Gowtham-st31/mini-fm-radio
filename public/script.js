@@ -8,10 +8,10 @@ let audioContext;
 let scriptProcessor;
 let gainNode;
 
-// Simple, reliable audio parameters
-const SAMPLE_RATE = 48000;
+// High-quality, reliable audio parameters
+const SAMPLE_RATE = 44100; // CD quality for clear sound
 const CHANNELS = 2;
-const BUFFER_SIZE = 4096;
+const BUFFER_SIZE = 2048; // Optimized buffer size
 
 function connectAsUser() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
