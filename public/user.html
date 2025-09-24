@@ -323,7 +323,7 @@
         console.log('🔗 Connecting to:', wsUrl);
         
         websocket = new WebSocket(wsUrl);
-        websocket.binaryType = 'blob';
+        websocket.binaryType = 'arraybuffer';
         
         websocket.onopen = () => {
           console.log('✅ WebSocket connected');
@@ -332,7 +332,7 @@
         };
         
         websocket.onmessage = (event) => {
-          handleAudioData(event.data);
+          handlePCMData(event.data);
         };
         
         websocket.onclose = () => {
@@ -350,35 +350,76 @@
       });
     }
 
-    // Handle incoming audio data
-    function handleAudioData(audioBlob) {
+    // Handle incoming PCM data and convert to audio
+    async function handlePCMData(arrayBuffer) {
       chunkCount++;
-      totalBytes += audioBlob.size;
+      totalBytes += arrayBuffer.byteLength;
       
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
       bufferStat.textContent = '100%';
       
-      console.log(`📡 Received audio: ${audioBlob.size} bytes`);
+      console.log(`📡 Received PCM: ${arrayBuffer.byteLength} bytes`);
       
-      // Play audio blob directly
+      // Convert PCM to WAV blob for HTML5 audio
       if (audioElement && playBtn.textContent === '⏸️') {
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioElement.src = audioUrl;
-        
-        // Cleanup URL after playing
-        audioElement.addEventListener('ended', () => {
-          URL.revokeObjectURL(audioUrl);
-        }, { once: true });
-        
-        // Auto-play if first chunk
-        if (chunkCount <= 2) {
+        try {
+          const wavBlob = pcmToWav(arrayBuffer, 48000, 1);
+          const audioUrl = URL.createObjectURL(wavBlob);
+          
+          // Set audio source
+          audioElement.src = audioUrl;
+          
+          // Auto-play
           audioElement.play().catch(e => {
-            console.log('⚠️ Autoplay prevented, click ▶️ to start');
+            console.log('⚠️ Autoplay issue:', e);
           });
+          
+          // Cleanup URL after a delay
+          setTimeout(() => {
+            URL.revokeObjectURL(audioUrl);
+          }, 5000);
+          
+        } catch (error) {
+          console.error('❌ PCM conversion error:', error);
         }
       }
+    }
+
+    // Convert PCM ArrayBuffer to WAV Blob
+    function pcmToWav(pcmArrayBuffer, sampleRate, channels) {
+      const pcmData = new Int16Array(pcmArrayBuffer);
+      const length = pcmData.length;
+      const buffer = new ArrayBuffer(44 + length * 2);
+      const view = new DataView(buffer);
+      
+      // WAV header
+      const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + length * 2, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * channels * 2, true);
+      view.setUint16(32, channels * 2, true);
+      view.setUint16(34, 16, true);
+      writeString(36, 'data');
+      view.setUint32(40, length * 2, true);
+      
+      // Copy PCM data
+      const pcmView = new Int16Array(buffer, 44);
+      pcmView.set(pcmData);
+      
+      return new Blob([buffer], { type: 'audio/wav' });
     }
 
     // Toggle audio playback
