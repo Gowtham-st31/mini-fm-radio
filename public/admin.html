@@ -332,9 +332,9 @@
         // Connect to Render WebSocket
         await connectRenderWebSocket();
         
-        updateStatus('🎙️ Processing high-quality audio...', 'streaming');
+        updateStatus('🎙️ Processing natural audio...', 'streaming');
         
-        // Create high-quality audio context
+        // Create simple, natural audio context
         if (!audioContext) {
           audioContext = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: SAMPLE_RATE,
@@ -343,40 +343,20 @@
           await audioContext.resume();
         }
         
-        // Create simplified audio processing pipeline
-        source = audioContext.createMediaStreamSource(stream);
-        processor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
+        // Use MediaRecorder for natural voice quality
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus',
+          audioBitsPerSecond: 128000 // High quality
+        });
         
-        processor.onaudioprocess = function(event) {
-          if (isRecording && websocket && websocket.readyState === WebSocket.OPEN) {
-            const inputBuffer = event.inputBuffer;
-            const numChannels = Math.min(inputBuffer.numberOfChannels, CHANNELS);
-            const frameCount = inputBuffer.length;
-            
-            // Create high-quality interleaved PCM data
-            const outputData = new Int16Array(frameCount * CHANNELS);
-            
-            for (let frame = 0; frame < frameCount; frame++) {
-              for (let channel = 0; channel < numChannels; channel++) {
-                const channelData = inputBuffer.getChannelData(channel);
-                // High-quality conversion with proper clamping
-                let sample = channelData[frame];
-                sample = Math.max(-1, Math.min(1, sample)); // Clamp to prevent distortion
-                outputData[frame * CHANNELS + channel] = Math.round(sample * 32767);
-              }
-              
-              // Duplicate mono to stereo if needed
-              if (numChannels === 1 && CHANNELS === 2) {
-                outputData[frame * CHANNELS + 1] = outputData[frame * CHANNELS];
-              }
-            }
-            
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0 && websocket && websocket.readyState === WebSocket.OPEN) {
             try {
-              websocket.send(outputData.buffer);
+              websocket.send(event.data);
               sendCount++;
               
-              if (sendCount % 200 === 0) {
-                console.log(`🎵 High-quality: ${sendCount} chunks sent (${sendErrors} errors)`);
+              if (sendCount % 50 === 0) {
+                console.log(`🎵 Natural audio: ${sendCount} chunks sent (${sendErrors} errors)`);
               }
             } catch (error) {
               sendErrors++;
@@ -385,9 +365,9 @@
           }
         };
         
-        // Connect audio nodes
-        source.connect(processor);
-        processor.connect(audioContext.destination);
+        // Start recording with short chunks for real-time streaming
+        mediaRecorder.start(100); // 100ms chunks for low latency
+        processor = mediaRecorder; // Store reference for cleanup
         
         // Start recording
         isRecording = true;
@@ -452,13 +432,13 @@
       });
     }
 
-    // Stop Render broadcasting
+    // Stop natural broadcasting
     function stopBroadcast() {
       isRecording = false;
       
-      // Disconnect audio processing
-      if (processor) {
-        processor.disconnect();
+      // Stop MediaRecorder
+      if (processor && processor.stop) {
+        processor.stop();
         processor = null;
       }
       
@@ -473,7 +453,7 @@
         audioContext = null;
       }
       
-      // Close Render WebSocket
+      // Close WebSocket
       if (websocket) {
         websocket.close();
         websocket = null;
@@ -487,9 +467,9 @@
       startBtn.style.display = 'inline-block';
       stopBtn.style.display = 'none';
       
-      updateStatus('📡 Render broadcasting stopped');
+      updateStatus('📡 Natural broadcasting stopped');
       
-      console.log('⏹️ Render broadcasting stopped');
+      console.log('⏹️ Natural broadcasting stopped');
     }
 
     // Update Render statistics
