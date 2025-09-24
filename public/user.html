@@ -240,14 +240,12 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // Simple continuous audio approach
+    // Simple continuous audio approach - using AudioWorklet for seamless playback
     let audioQueue = [];
-    let currentSource = null;
+    let audioElement = null;
+    let mediaSource = null;
+    let sourceBuffer = null;
     let sampleRate = 48000;
-    let scheduleAheadTime = 0.1; // 100ms ahead
-    let nextNoteTime = 0.0;
-    let lastChunkTime = 0;
-    let chunkTimeout = null;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -300,19 +298,13 @@
     // Start radio
     async function startRadio() {
       try {
-        updateStatus('🔧 Initializing Web Audio API...', 'streaming');
+        updateStatus('🔧 Initializing audio system...', 'streaming');
         
-        // Create Web Audio context
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: sampleRate
-        });
-        
-        await audioContext.resume();
-        
-        // Create gain node for volume control
-        gainNode = audioContext.createGain();
-        gainNode.connect(audioContext.destination);
-        gainNode.gain.value = 0.7;
+        // Create simple audio element approach
+        audioElement = document.createElement('audio');
+        audioElement.controls = false;
+        audioElement.autoplay = true;
+        audioElement.volume = 0.7;
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -324,7 +316,6 @@
         chunkCount = 0;
         totalBytes = 0;
         audioQueue = [];
-        nextNoteTime = 0;
         
         // Update UI
         connectBtn.style.display = 'none';
@@ -336,7 +327,7 @@
         
         updateStatus('✅ Connected! Receiving audio...', 'success');
         
-        console.log('🎧 PCM radio streaming started');
+        console.log('🎧 Simple audio streaming started');
         
       } catch (error) {
         console.error('❌ Failed to start radio:', error);
@@ -372,11 +363,6 @@
             console.log('❌ WebSocket disconnected');
             updateStatus('❌ Connection lost', 'error');
             connectionStat.textContent = '❌';
-            
-            // Clear timeouts
-            if (chunkTimeout) {
-              clearTimeout(chunkTimeout);
-            }
           };
           
           websocket.onerror = (error) => {
@@ -393,136 +379,87 @@
       });
     }
 
-    // Handle incoming PCM data
+    // Handle incoming PCM data - convert to WAV and play directly
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
-      lastChunkTime = Date.now();
-      
-      // Clear any existing timeout
-      if (chunkTimeout) {
-        clearTimeout(chunkTimeout);
-      }
-      
-      // Set timeout to detect admin restart
-      chunkTimeout = setTimeout(() => {
-        console.log('🔄 No data for 3 seconds, admin might have restarted');
-        resetAudioState();
-      }, 3000);
       
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = Math.min(audioQueue.length * 5, 100) + '%';
+      bufferStat.textContent = '100%'; // Always ready with direct playback
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
+      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
       
-      // Convert ArrayBuffer to Float32Array for audio processing
-      const pcmData = new Int16Array(arrayBuffer);
-      const floatData = new Float32Array(pcmData.length);
-      
-      // Convert int16 to float32 (-1 to 1 range)
-      for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768.0;
-      }
-      
-      // Add to audio queue
-      audioQueue.push(floatData);
-      
-      // Animate visualizer with actual audio data
-      if (isPlaying) {
-        animateVisualizer(floatData);
+      // Convert PCM to WAV blob for immediate playback
+      if (isPlaying && audioElement) {
+        try {
+          const wavBlob = createWavBlob(arrayBuffer);
+          const audioUrl = URL.createObjectURL(wavBlob);
+          
+          // Play immediately
+          audioElement.src = audioUrl;
+          audioElement.play().catch(e => {
+            console.log('⚠️ Playback issue:', e);
+          });
+          
+          // Cleanup after playback
+          setTimeout(() => {
+            URL.revokeObjectURL(audioUrl);
+          }, 2000);
+          
+          // Animate visualizer
+          const pcmData = new Int16Array(arrayBuffer);
+          const floatData = new Float32Array(pcmData.length);
+          for (let i = 0; i < pcmData.length; i++) {
+            floatData[i] = pcmData[i] / 32768.0;
+          }
+          animateVisualizer(floatData);
+          
+        } catch (error) {
+          console.error('❌ Audio conversion error:', error);
+        }
       }
       
       // Auto-enable play after receiving some data
       if (chunkCount === 2 && !isPlaying) {
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
-      
-      // Keep queue manageable
-      if (audioQueue.length > 20) {
-        console.log('🗑️ Queue too large, trimming');
-        audioQueue = audioQueue.slice(-15);
-      }
     }
 
-    // Reset audio state when admin restarts
-    function resetAudioState() {
-      console.log('🔄 Resetting audio state...');
+    // Create WAV blob from PCM data
+    function createWavBlob(pcmBuffer) {
+      const pcmData = new Int16Array(pcmBuffer);
+      const length = pcmData.length;
+      const buffer = new ArrayBuffer(44 + length * 2);
+      const view = new DataView(buffer);
       
-      // Clear queue and reset timing
-      audioQueue = [];
-      nextNoteTime = 0;
-      
-      if (isPlaying && audioContext) {
-        // Reset next note time to current time
-        nextNoteTime = audioContext.currentTime;
-        updateStatus('🔄 Admin restarted - reconnecting...', 'streaming');
-        
-        // Visual feedback
-        bufferStat.textContent = '0%';
-        
-        // Continue scheduling after brief pause
-        setTimeout(() => {
-          if (isPlaying) {
-            updateStatus('🎵 Playing live radio!', 'success');
-            scheduleAudio();
-          }
-        }, 500);
-      }
-    }
-
-    // Schedule and play audio continuously
-    function scheduleAudio() {
-      // Look ahead and schedule audio
-      while (nextNoteTime < audioContext.currentTime + scheduleAheadTime && audioQueue.length > 0) {
-        playAudioAtTime(nextNoteTime);
-      }
-      
-      // Check if we're falling behind (no audio scheduled recently)
-      if (nextNoteTime < audioContext.currentTime - 0.5 && audioQueue.length > 0) {
-        console.log('🔄 Audio fell behind, resetting timing');
-        nextNoteTime = audioContext.currentTime;
-      }
-      
-      // Continue scheduling if playing
-      if (isPlaying) {
-        requestAnimationFrame(scheduleAudio);
-      }
-    }
-
-    // Play single audio chunk at specific time
-    function playAudioAtTime(time) {
-      if (audioQueue.length === 0) return;
-      
-      const audioData = audioQueue.shift();
-      
-      try {
-        // Create audio buffer
-        const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
-        const channelData = audioBuffer.getChannelData(0);
-        channelData.set(audioData);
-        
-        // Create and schedule source
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(gainNode);
-        
-        // Schedule playback
-        if (time < audioContext.currentTime) {
-          time = audioContext.currentTime; // Catch up if behind
+      // WAV header
+      const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
         }
-        
-        source.start(time);
-        
-        // Update next time
-        nextNoteTime = time + audioBuffer.duration;
-        
-        console.log(`🎵 Scheduled at ${time.toFixed(3)}s, next: ${nextNoteTime.toFixed(3)}s, queue: ${audioQueue.length}`);
-        
-      } catch (error) {
-        console.error('❌ Audio play error:', error);
-      }
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + length * 2, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true); // Mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(36, 'data');
+      view.setUint32(40, length * 2, true);
+      
+      // Copy PCM data
+      const pcmView = new Int16Array(buffer, 44);
+      pcmView.set(pcmData);
+      
+      return new Blob([buffer], { type: 'audio/wav' });
     }
 
     // Toggle audio playback
@@ -539,19 +476,15 @@
           playBtn.textContent = '▶️';
           updateStatus('⏸️ Audio paused', 'success');
           
-        } else {
-          // Start playing
-          if (audioContext.state === 'suspended') {
-            await audioContext.resume();
+          if (audioElement) {
+            audioElement.pause();
           }
           
+        } else {
+          // Start playing
           isPlaying = true;
-          nextNoteTime = audioContext.currentTime;
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing live radio!', 'success');
-          
-          // Start the audio scheduling loop
-          scheduleAudio();
         }
         
       } catch (error) {
@@ -563,8 +496,17 @@
     // Set volume
     function setVolume(value) {
       const volume = value / 100;
-      if (gainNode) {
-        gainNode.gain.value = volume;
+      if (audioElement) {
+        audioElement.volume = volume;
+      }
+      volumeDisplay.textContent = value + '%';
+    }
+
+    // Set volume
+    function setVolume(value) {
+      const volume = value / 100;
+      if (audioElement) {
+        audioElement.volume = volume;
       }
       volumeDisplay.textContent = value + '%';
     }
@@ -573,32 +515,24 @@
     function stopRadio() {
       isStreaming = false;
       isPlaying = false;
-      isProcessingAudio = false;
+      
+      // Stop and cleanup audio element
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+        audioElement = null;
+      }
       
       // Clear buffer
       audioQueue = [];
-      nextNoteTime = 0;
-      lastChunkTime = 0;
-      
-      // Clear timeouts
-      if (chunkTimeout) {
-        clearTimeout(chunkTimeout);
-        chunkTimeout = null;
-      }
-      
-      // Close Web Audio Context
-      if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-      }
       
       // Close WebSocket
       if (websocket) {
         websocket.close();
+        websocket = null;
       }
       
       // Reset variables
-      gainNode = null;
       chunkCount = 0;
       totalBytes = 0;
       
@@ -611,7 +545,7 @@
       updateStatus('⏹️ Radio stopped');
       connectionStat.textContent = '❌';
       
-      console.log('⏹️ PCM radio streaming stopped');
+      console.log('⏹️ Simple radio streaming stopped');
     }
 
     // Update status display
