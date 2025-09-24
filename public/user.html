@@ -1,10 +1,11 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FM Radio - User Player</title>
+  <title>FM Radio - PCM Player</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -240,27 +241,12 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // Adaptive audio streaming system
+    // Simple continuous audio approach
     let audioQueue = [];
-    let audioElement = null;
-    let isBuffering = false;
-    let bufferSize = 0;
-    let nextPlayTime = 0;
-    let audioScheduler = null;
-    
-    // Robust PCM buffer with automatic recovery
-    let pcmBuffer = new Float32Array(0);
-    let minBufferSize = 2400; // 50ms at 48kHz
-    let targetBufferSize = 4800; // 100ms at 48kHz
-    
-    // Admin pause/resume detection with stream restart handling
-    let streamState = 'active'; // 'active', 'paused', 'restarting'
-    let lastAudioLevel = 0;
-    let silenceThreshold = 0.001;
-    let silenceDuration = 0;
-    let maxSilenceBeforeReset = 500; // 0.5 seconds of silence
-    let consecutiveAudioChunks = 0;
-    let lastChunkTime = 0;
+    let currentSource = null;
+    let sampleRate = 48000;
+    let scheduleAheadTime = 0.1; // 100ms ahead
+    let nextNoteTime = 0.0;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -313,13 +299,19 @@
     // Start radio
     async function startRadio() {
       try {
-        updateStatus('🔧 Initializing audio system...', 'streaming');
+        updateStatus('🔧 Initializing Web Audio API...', 'streaming');
         
-        // Create simple audio element approach
-        audioElement = document.createElement('audio');
-        audioElement.controls = false;
-        audioElement.autoplay = true;
-        audioElement.volume = 0.7;
+        // Create Web Audio context
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: sampleRate
+        });
+        
+        await audioContext.resume();
+        
+        // Create gain node for volume control
+        gainNode = audioContext.createGain();
+        gainNode.connect(audioContext.destination);
+        gainNode.gain.value = 0.7;
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -331,6 +323,7 @@
         chunkCount = 0;
         totalBytes = 0;
         audioQueue = [];
+        nextNoteTime = 0;
         
         // Update UI
         connectBtn.style.display = 'none';
@@ -342,7 +335,7 @@
         
         updateStatus('✅ Connected! Receiving audio...', 'success');
         
-        console.log('🎧 Simple audio streaming started');
+        console.log('🎧 PCM radio streaming started');
         
       } catch (error) {
         console.error('❌ Failed to start radio:', error);
@@ -394,7 +387,7 @@
       });
     }
 
-    // Handle incoming PCM data - direct real-time processing
+    // Handle incoming PCM data
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
@@ -402,193 +395,83 @@
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = '🔴 LIVE';
+      bufferStat.textContent = Math.min(audioQueue.length * 5, 100) + '%';
       
-      console.log(`📡 Direct PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
+      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
       
-      // Process audio immediately for zero latency
-      processIncomingAudio(arrayBuffer);
+      // Convert ArrayBuffer to Float32Array for audio processing
+      const pcmData = new Int16Array(arrayBuffer);
+      const floatData = new Float32Array(pcmData.length);
       
-      // Animate visualizer
+      // Convert int16 to float32 (-1 to 1 range)
+      for (let i = 0; i < pcmData.length; i++) {
+        floatData[i] = pcmData[i] / 32768.0;
+      }
+      
+      // Add to audio queue
+      audioQueue.push(floatData);
+      
+      // Animate visualizer with actual audio data
       if (isPlaying) {
-        const pcmData = new Int16Array(arrayBuffer);
-        const floatData = new Float32Array(pcmData.length);
-        for (let i = 0; i < pcmData.length; i++) {
-          floatData[i] = pcmData[i] / 32768.0;
-        }
         animateVisualizer(floatData);
       }
       
       // Auto-enable play after receiving some data
       if (chunkCount === 2 && !isPlaying) {
-        updateStatus('🎵 Ready! Click ▶️ to hear live audio', 'success');
+        updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
+      }
+      
+      // Keep queue manageable
+      if (audioQueue.length > 20) {
+        console.log('🗑️ Queue too large, trimming');
+        audioQueue = audioQueue.slice(-15);
       }
     }
 
-    // Process audio queue smoothly without breaking
-    // Initialize global PCM buffer with automatic recovery
-    window.pcmBuffer = new Float32Array(0);
-    
-    // Complete audio system reset for clean restart
-    function resetAudioSystem() {
-      try {
-        console.log('🔧 Resetting audio system...');
-        
-        // Stop current scheduling
-        if (audioScheduler) {
-          clearInterval(audioScheduler);
-          audioScheduler = null;
-        }
-        
-        // Clear all buffers
-        window.pcmBuffer = new Float32Array(0);
-        nextPlayTime = 0;
-        
-        // Reset audio context timing
-        if (audioContext && audioContext.state === 'running') {
-          nextPlayTime = audioContext.currentTime + 0.1; // Fresh start with small delay
-        }
-        
-        // Reset stream state variables
-        silenceDuration = 0;
-        consecutiveAudioChunks = 0;
-        lastAudioLevel = 0;
-        
-        // Restart scheduling if audio is playing
-        if (isPlaying && audioContext && audioContext.state === 'running') {
-          audioScheduler = setInterval(() => {
-            if (isPlaying && window.pcmBuffer.length >= minBufferSize) {
-              scheduleAudioPlayback();
-            }
-          }, 25);
-        }
-        
-        console.log('✅ Audio system reset complete');
-        
-      } catch (error) {
-        console.error('❌ Audio reset error:', error);
+    // Schedule and play audio continuously
+    function scheduleAudio() {
+      // Look ahead and schedule audio
+      while (nextNoteTime < audioContext.currentTime + scheduleAheadTime && audioQueue.length > 0) {
+        playAudioAtTime(nextNoteTime);
+      }
+      
+      // Continue scheduling if playing
+      if (isPlaying) {
+        requestAnimationFrame(scheduleAudio);
       }
     }
-    
-    // Adaptive audio processing with stream restart detection
-    function processIncomingAudio(pcmBufferData) {
-      if (!audioContext || !gainNode || !isPlaying) return;
+
+    // Play single audio chunk at specific time
+    function playAudioAtTime(time) {
+      if (audioQueue.length === 0) return;
+      
+      const audioData = audioQueue.shift();
       
       try {
-        const pcmData = new Int16Array(pcmBufferData);
-        const currentTime = Date.now();
+        // Create audio buffer
+        const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
+        const channelData = audioBuffer.getChannelData(0);
+        channelData.set(audioData);
         
-        // Convert to float with better precision
-        const floatData = new Float32Array(pcmData.length);
-        let maxAmplitude = 0;
+        // Create and schedule source
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(gainNode);
         
-        for (let i = 0; i < pcmData.length; i++) {
-          floatData[i] = Math.max(-1, Math.min(1, pcmData[i] / 32768.0));
-          maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
+        // Schedule playback
+        if (time < audioContext.currentTime) {
+          time = audioContext.currentTime; // Catch up if behind
         }
         
-        // Detect stream interruption and restart
-        const timeSinceLastChunk = currentTime - lastChunkTime;
-        lastChunkTime = currentTime;
+        source.start(time);
         
-        if (maxAmplitude < silenceThreshold) {
-          // Silence detected
-          silenceDuration += Math.min(timeSinceLastChunk, 100);
-          consecutiveAudioChunks = 0;
-          
-          if (silenceDuration > maxSilenceBeforeReset && streamState !== 'paused') {
-            console.log('🔇 Stream paused - stopping audio scheduling');
-            streamState = 'paused';
-            
-            // Stop all scheduled audio immediately
-            if (audioScheduler) {
-              clearInterval(audioScheduler);
-              audioScheduler = null;
-            }
-            
-            // Clear buffer to prevent stale audio
-            window.pcmBuffer = new Float32Array(0);
-            nextPlayTime = 0;
-            
-            updateStatus('⏸️ Admin paused - waiting for resume...', 'streaming');
-          }
-        } else {
-          // Audio detected
-          consecutiveAudioChunks++;
-          
-          // Check if we're resuming from pause
-          if (streamState === 'paused' && consecutiveAudioChunks >= 2) {
-            console.log('🔄 Stream resumed - restarting audio system');
-            streamState = 'restarting';
-            
-            // Complete system reset for clean restart
-            await resetAudioSystem();
-            
-            streamState = 'active';
-            updateStatus('� LIVE - Stream resumed successfully!', 'success');
-          }
-          
-          silenceDuration = 0;
-        }
+        // Update next time
+        nextNoteTime = time + audioBuffer.duration;
         
-        lastAudioLevel = maxAmplitude;
-        
-        // Only process audio if stream is active
-        if (streamState === 'active') {
-          // Add to continuous buffer
-          const newBuffer = new Float32Array(window.pcmBuffer.length + floatData.length);
-          newBuffer.set(window.pcmBuffer);
-          newBuffer.set(floatData, window.pcmBuffer.length);
-          window.pcmBuffer = newBuffer;
-          
-          // Start/continue playback
-          scheduleAudioPlayback();
-        }
-        
-        console.log(`🎵 Audio: ${floatData.length} samples, level: ${maxAmplitude.toFixed(4)}, state: ${streamState}`);
+        console.log(`🎵 Scheduled at ${time.toFixed(3)}s, next: ${nextNoteTime.toFixed(3)}s, queue: ${audioQueue.length}`);
         
       } catch (error) {
-        console.error('❌ Audio processing error:', error);
-        resetAudioSystem();
-      }
-    }
-    
-    // Adaptive scheduling that prevents gaps and recovers automatically
-    function scheduleAudioPlayback() {
-      if (!audioContext || !isPlaying || window.pcmBuffer.length < minBufferSize) return;
-      
-      try {
-        const currentTime = audioContext.currentTime;
-        
-        // Auto-recovery: reset timing if we're behind schedule
-        if (nextPlayTime < currentTime) {
-          nextPlayTime = currentTime + 0.05; // Small delay for stability
-          console.log('🔄 Audio timing reset for continuous playback');
-        }
-        
-        // Play chunks while we have enough buffered data
-        while (window.pcmBuffer.length >= targetBufferSize && nextPlayTime < currentTime + 0.5) {
-          const chunk = window.pcmBuffer.slice(0, targetBufferSize);
-          window.pcmBuffer = window.pcmBuffer.slice(targetBufferSize);
-          
-          // Create and schedule audio buffer
-          const audioBuffer = audioContext.createBuffer(1, chunk.length, 48000);
-          audioBuffer.getChannelData(0).set(chunk);
-          
-          const source = audioContext.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(gainNode);
-          
-          source.start(nextPlayTime);
-          nextPlayTime += audioBuffer.duration;
-          
-          console.log(`🎵 Scheduled audio chunk: ${chunk.length} samples at ${nextPlayTime.toFixed(3)}s`);
-        }
-        
-      } catch (error) {
-        console.error('❌ Audio scheduling error:', error);
-        // Reset timing on error
-        nextPlayTime = audioContext.currentTime + 0.05;
+        console.error('❌ Audio play error:', error);
       }
     }
 
@@ -606,57 +489,19 @@
           playBtn.textContent = '▶️';
           updateStatus('⏸️ Audio paused', 'success');
           
-          // Stop scheduling
-          if (audioScheduler) {
-            clearInterval(audioScheduler);
-            audioScheduler = null;
-          }
-          
-          if (audioContext) {
-            await audioContext.suspend();
-          }
-          
         } else {
-          // Start playing - initialize Web Audio API
-          if (!audioContext || audioContext.state === 'closed') {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)({
-              sampleRate: 48000,
-              latencyHint: 'interactive'
-            });
-            
-            gainNode = audioContext.createGain();
-            gainNode.connect(audioContext.destination);
-            gainNode.gain.value = parseFloat(document.getElementById('volumeSlider').value) / 100;
-            
-            console.log('🎧 Web Audio API initialized for real-time streaming');
-          }
-          
+          // Start playing
           if (audioContext.state === 'suspended') {
             await audioContext.resume();
           }
           
-          // Reset timing and buffer for new session
-          nextPlayTime = audioContext.currentTime + 0.1; // Small initial delay
-          window.pcmBuffer = new Float32Array(0);
-          
-          // Reset stream state and detection system
-          streamState = 'active';
-          silenceDuration = 0;
-          consecutiveAudioChunks = 0;
-          lastAudioLevel = 0;
-          lastChunkTime = Date.now();
-          
-          // Start continuous scheduling monitor
-          if (audioScheduler) clearInterval(audioScheduler);
-          audioScheduler = setInterval(() => {
-            if (isPlaying && window.pcmBuffer.length >= minBufferSize) {
-              scheduleAudioPlayback();
-            }
-          }, 25); // Check every 25ms for smooth playback
-          
           isPlaying = true;
+          nextNoteTime = audioContext.currentTime;
           playBtn.textContent = '⏸️';
-          updateStatus('🔴 LIVE - Real-time audio streaming!', 'success');
+          updateStatus('🎵 Playing live radio!', 'success');
+          
+          // Start the audio scheduling loop
+          scheduleAudio();
         }
         
       } catch (error) {
@@ -666,7 +511,6 @@
     }
 
     // Set volume
-    // Set volume for Web Audio API
     function setVolume(value) {
       const volume = value / 100;
       if (gainNode) {
@@ -679,39 +523,24 @@
     function stopRadio() {
       isStreaming = false;
       isPlaying = false;
+      isProcessingAudio = false;
       
-      // Stop and cleanup audio context
-      if (audioContext) {
-        audioContext.suspend();
-      }
-      
-      // Stop scheduling
-      if (audioScheduler) {
-        clearInterval(audioScheduler);
-        audioScheduler = null;
-      }
-      
-      // Clear buffers
+      // Clear buffer
       audioQueue = [];
-      if (typeof window.pcmBuffer !== 'undefined') {
-        window.pcmBuffer = new Float32Array(0);
-      }
-      nextPlayTime = 0;
       
-      // Reset stream state and detection
-      streamState = 'active';
-      silenceDuration = 0;
-      consecutiveAudioChunks = 0;
-      lastAudioLevel = 0;
-      lastChunkTime = 0;
+      // Close Web Audio Context
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
       
       // Close WebSocket
       if (websocket) {
         websocket.close();
-        websocket = null;
       }
       
       // Reset variables
+      gainNode = null;
       chunkCount = 0;
       totalBytes = 0;
       
@@ -724,7 +553,7 @@
       updateStatus('⏹️ Radio stopped');
       connectionStat.textContent = '❌';
       
-      console.log('⏹️ Real-time radio streaming stopped');
+      console.log('⏹️ PCM radio streaming stopped');
     }
 
     // Update status display
