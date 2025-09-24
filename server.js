@@ -60,6 +60,11 @@ wss.on("connection", (ws, req) => {
 // Serve static files
 app.use(express.static(path.join(__dirname, "public")));
 
+// Root redirect to user page
+app.get('/', (req, res) => {
+  res.redirect('/user-natural.html');
+});
+
 // Health check
 app.get('/health', (req, res) => {
   const uptime = Math.floor((Date.now() - serverStartTime) / 1000);
@@ -80,6 +85,6 @@ server.listen(PORT, HOST, () => {
   console.log(`🎵 Natural Voice FM Server running on ${HOST}:${PORT}`);
   console.log(`📻 Audio: WebM/Opus format, optimized for natural voice`);
   console.log(`🖥️ Screen Admin: http://localhost:${PORT}/screen-admin.html`);
-  console.log(`🎧 User Player: http://localhost:${PORT}/user.html`);
+  console.log(`🎧 User Player: http://localhost:${PORT}/user-natural.html`);
   console.log(`💚 Health: http://localhost:${PORT}/health`);
 });
