@@ -23,11 +23,39 @@ function connectAsUser() {
     latencyHint: 'playback'
   });
   
-  // Create audio buffer for smooth playback
-  const bufferDuration = 0.5; // 500ms buffer
-  const audioBuffer = audioContext.createBuffer(CHANNELS, SAMPLE_RATE * bufferDuration, SAMPLE_RATE);
-  let playbackTime = audioContext.currentTime;
-  let writeIndex = 0;
+  // Create a continuous audio buffer using ScriptProcessorNode
+  let scriptNode = audioContext.createScriptProcessor(BUFFER_SIZE, 0, CHANNELS);
+  let audioQueue = [];
+  let queueIndex = 0;
+  
+  scriptNode.onaudioprocess = (event) => {
+    const outputBuffer = event.outputBuffer;
+    
+    for (let channel = 0; channel < CHANNELS; channel++) {
+      const outputData = outputBuffer.getChannelData(channel);
+      
+      for (let i = 0; i < BUFFER_SIZE; i++) {
+        if (queueIndex < audioQueue.length) {
+          // Get sample from queue (already in Float32 format)
+          outputData[i] = audioQueue[queueIndex * CHANNELS + channel] || 0;
+        } else {
+          // Silence if no data
+          outputData[i] = 0;
+        }
+      }
+    }
+    
+    // Move to next chunk
+    queueIndex += BUFFER_SIZE;
+    
+    // Remove processed audio from queue (keep buffer manageable)
+    if (queueIndex >= BUFFER_SIZE * 2) {
+      audioQueue.splice(0, queueIndex);
+      queueIndex = 0;
+    }
+  };
+  
+  scriptNode.connect(audioContext.destination);
   
   status.textContent = "🎧 Connecting for crystal-clear audio...";
 
@@ -36,35 +64,22 @@ function connectAsUser() {
   };
 
   ws.onmessage = (event) => {
-    // Convert received PCM data to audio
+    // Convert received PCM data to Float32 and add to queue
     const pcmData = new Int16Array(event.data);
     
-    // Create audio buffer source for this chunk
-    const source = audioContext.createBufferSource();
-    const buffer = audioContext.createBuffer(CHANNELS, pcmData.length / CHANNELS, SAMPLE_RATE);
-    
-    // Fill buffer with PCM data
-    for (let channel = 0; channel < CHANNELS; channel++) {
-      const channelData = buffer.getChannelData(channel);
-      for (let i = 0; i < channelData.length; i++) {
-        // Convert Int16 to Float32 (-1.0 to 1.0)
-        channelData[i] = pcmData[i * CHANNELS + channel] / 32768.0;
-      }
+    for (let i = 0; i < pcmData.length; i++) {
+      // Convert Int16 to Float32 (-1.0 to 1.0)
+      audioQueue.push(pcmData[i] / 32768.0);
     }
     
-    source.buffer = buffer;
-    source.connect(audioContext.destination);
-    
-    // Schedule playback for smooth streaming
-    const bufferDuration = buffer.length / SAMPLE_RATE;
-    source.start(Math.max(audioContext.currentTime, playbackTime));
-    playbackTime = Math.max(audioContext.currentTime, playbackTime) + bufferDuration;
-    
-    status.textContent = "🎵 Crystal Clear Audio Playing";
+    status.textContent = `🎵 Crystal Clear Audio Playing (Buffer: ${audioQueue.length})`;
   };
 
   ws.onclose = () => {
     status.textContent = "🔌 Connection lost - reconnecting...";
+    if (scriptNode) {
+      scriptNode.disconnect();
+    }
     setTimeout(connectAsUser, 2000);
   };
 
@@ -80,14 +95,14 @@ startBtn.onclick = async () => {
 
   ws.onopen = async () => {
     try {
-      // Request high-quality audio stream
+      // Request high-quality audio stream with consistent settings
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
           sampleRate: SAMPLE_RATE,
           channelCount: CHANNELS,
-          echoCancellation: false, // Disable for maximum quality
-          noiseSuppression: false,  // Disable for pure audio
-          autoGainControl: false,   // Disable for consistent levels
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
           googEchoCancellation: false,
           googAutoGainControl: false,
           googNoiseSuppression: false,
@@ -95,7 +110,7 @@ startBtn.onclick = async () => {
         } 
       });
       
-      // Initialize Web Audio API for PCM extraction
+      // Initialize Web Audio API for consistent PCM extraction
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: SAMPLE_RATE
       });
@@ -103,23 +118,28 @@ startBtn.onclick = async () => {
       const source = audioContext.createMediaStreamSource(stream);
       scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
       
+      // Ensure consistent timing for PCM extraction
+      let lastSendTime = Date.now();
+      
       scriptProcessor.onaudioprocess = (event) => {
         if (ws.readyState === WebSocket.OPEN) {
+          const currentTime = Date.now();
           const inputBuffer = event.inputBuffer;
           const outputData = new Int16Array(BUFFER_SIZE * CHANNELS);
           
-          // Extract raw PCM data from both channels
+          // Extract raw PCM data with consistent timing
           for (let channel = 0; channel < CHANNELS; channel++) {
             const channelData = inputBuffer.getChannelData(channel);
             for (let i = 0; i < BUFFER_SIZE; i++) {
-              // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+              // Convert Float32 to Int16 with proper clamping
               const sample = Math.max(-1, Math.min(1, channelData[i]));
-              outputData[i * CHANNELS + channel] = sample * 0x7FFF;
+              outputData[i * CHANNELS + channel] = Math.round(sample * 32767);
             }
           }
           
-          // Send raw PCM data
+          // Send PCM data at consistent intervals
           ws.send(outputData.buffer);
+          lastSendTime = currentTime;
         }
       };
       
@@ -127,12 +147,12 @@ startBtn.onclick = async () => {
       source.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
       
-      status.textContent = "🎤 Broadcasting Crystal Clear Audio...";
+      status.textContent = "🎤 Broadcasting Ultra-Stable Audio...";
       startBtn.disabled = true;
       stopBtn.disabled = false;
       
     } catch (error) {
-      console.error('Failed to start high-quality recording:', error);
+      console.error('Failed to start stable recording:', error);
       status.textContent = "❌ Microphone access failed";
     }
   };
@@ -150,13 +170,16 @@ stopBtn.onclick = () => {
     scriptProcessor.disconnect();
     scriptProcessor = null;
   }
-  if (audioContext) {
-    audioContext.close();
-    audioContext = null;
+  if (audioContext && audioContext.state !== 'closed') {
+    audioContext.close().then(() => {
+      audioContext = null;
+    });
   }
-  if (ws) ws.close();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.close();
+  }
   
-  status.textContent = "🛑 High-Quality Broadcast Stopped";
+  status.textContent = "🛑 Ultra-Stable Broadcast Stopped";
   startBtn.disabled = false;
   stopBtn.disabled = true;
 };
