@@ -68,8 +68,8 @@ app.get('/health', (req, res) => {
     clients: clients.length,
     uptime: uptime,
     broadcasts: broadcastCount,
-    audioQuality: 'high',
-    sampleRate: SAMPLE_RATE
+    audioQuality: 'natural-voice',
+    format: 'WebM/Opus'
   });
 });
 
