@@ -1,127 +1,69 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Mini FM Admin</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(to right, #ff758c, #ff7eb3);
-      text-align: center;
-      color: white;
-      padding: 50px;
-    }
-    button {
-      padding: 15px 30px;
-      font-size: 18px;
-      margin: 10px;
-      cursor: pointer;
-      border: none;
-      border-radius: 8px;
-      background: white;
-      color: #ff3c78;
-      font-weight: bold;
-    }
-    button:hover {
-      background: #ff3c78;
-      color: white;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Admin - Mini FM Radio</title>
 </head>
 <body>
-  <h1>🎙️ Mini FM - Admin Panel</h1>
-  <button id="startBtn">Start Broadcast</button>
-  <button id="stopBtn" disabled>Stop Broadcast</button>
-  <p id="status">Status: Idle</p>
+<h1>Admin Broadcast</h1>
+<button onclick="startBroadcast()">Start Broadcast</button>
+<button onclick="stopBroadcast()">Stop Broadcast</button>
+<p id="status">Status: Idle</p>
 
-  <script>
-    let audioContext;
-    let processor;
-    let source;
-    let websocket;
-    let isRecording = false;
+<script>
+let websocket = null;
+let audioContext = null;
+let processor = null;
+let source = null;
+let isBroadcasting = false;
 
-    document.getElementById("startBtn").addEventListener("click", startBroadcast);
-    document.getElementById("stopBtn").addEventListener("click", stopBroadcast);
+async function startBroadcast() {
+  websocket = new WebSocket("ws://localhost:8080");
+  websocket.binaryType = "arraybuffer";
 
-    function startBroadcast() {
-      if (isRecording) return;
+  websocket.onopen = () => {
+    document.getElementById("status").innerText = "Connected to server";
+    captureAudio();
+  };
+}
 
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 2,
-          sampleRate: 44100,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
-      }).then(stream => {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        source = audioContext.createMediaStreamSource(stream);
+async function captureAudio() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  audioContext = new AudioContext({ sampleRate: 48000 });
+  await audioContext.resume();
 
-        // stereo input + stereo output
-        processor = audioContext.createScriptProcessor(4096, 2, 2);
+  source = audioContext.createMediaStreamSource(stream);
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        processor.onaudioprocess = function(event) {
-          if (isRecording && websocket && websocket.readyState === WebSocket.OPEN) {
-            const leftChannel = event.inputBuffer.getChannelData(0);
-            const rightChannel = event.inputBuffer.getChannelData(1);
+  processor.onaudioprocess = function(event) {
+    if (!isBroadcasting) return;
 
-            // Interleave L+R into one buffer
-            const interleaved = new Float32Array(leftChannel.length * 2);
-            for (let i = 0, j = 0; i < leftChannel.length; i++, j += 2) {
-              interleaved[j] = leftChannel[i];
-              interleaved[j + 1] = rightChannel[i];
-            }
+    const inputData = event.inputBuffer.getChannelData(0);
+    const buffer = new ArrayBuffer(inputData.length * 2);
+    const view = new DataView(buffer);
 
-            // Convert float (-1..1) → 16-bit PCM
-            const pcmBuffer = new ArrayBuffer(interleaved.length * 2);
-            const pcmView = new DataView(pcmBuffer);
-
-            for (let i = 0; i < interleaved.length; i++) {
-              const s = Math.max(-1, Math.min(1, interleaved[i]));
-              pcmView.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-            }
-
-            websocket.send(pcmBuffer);
-          }
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-
-        websocket = new WebSocket("ws://localhost:3000");
-        websocket.binaryType = "arraybuffer";
-
-        websocket.onopen = () => {
-          isRecording = true;
-          document.getElementById("status").innerText = "Status: Broadcasting 🎶";
-          document.getElementById("startBtn").disabled = true;
-          document.getElementById("stopBtn").disabled = false;
-        };
-
-        websocket.onerror = err => {
-          console.error("WebSocket error:", err);
-        };
-
-      }).catch(err => {
-        console.error("Error accessing audio:", err);
-        alert("Could not access microphone / VB Cable");
-      });
+    for (let i = 0; i < inputData.length; i++) {
+      let sample = Math.max(-1, Math.min(1, inputData[i]));
+      view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
     }
 
-    function stopBroadcast() {
-      isRecording = false;
-      if (processor) processor.disconnect();
-      if (source) source.disconnect();
-      if (audioContext) audioContext.close();
-      if (websocket && websocket.readyState === WebSocket.OPEN) {
-        websocket.close();
-      }
-      document.getElementById("status").innerText = "Status: Stopped ❌";
-      document.getElementById("startBtn").disabled = false;
-      document.getElementById("stopBtn").disabled = true;
-    }
-  </script>
+    websocket.send(buffer);
+  };
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+  isBroadcasting = true;
+  document.getElementById("status").innerText = "Broadcasting...";
+}
+
+function stopBroadcast() {
+  isBroadcasting = false;
+  if (processor) processor.disconnect();
+  if (source) source.disconnect();
+  if (audioContext) audioContext.close();
+  if (websocket) websocket.close();
+  document.getElementById("status").innerText = "Stopped";
+}
+</script>
 </body>
 </html>
