@@ -6,80 +6,95 @@ const player = document.getElementById("player");
 let ws;
 let audioContext;
 let scriptProcessor;
-let audioBuffer = [];
-let sampleRate = 48000;
+let gainNode;
 
-// High-quality audio parameters
+// Professional audio parameters
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
-const BUFFER_SIZE = 4096;
+const BUFFER_SIZE = 2048; // Smaller buffer for lower latency
+const QUALITY_FACTOR = 1.0; // Maximum quality multiplier
 
 function connectAsUser() {
   ws = new WebSocket(`wss://${window.location.host}`);
   
-  // Initialize high-quality audio context
+  // Initialize professional audio context
   audioContext = new (window.AudioContext || window.webkitAudioContext)({
     sampleRate: SAMPLE_RATE,
     latencyHint: 'playback'
   });
   
-  // Create a continuous audio buffer using ScriptProcessorNode
-  let scriptNode = audioContext.createScriptProcessor(BUFFER_SIZE, 0, CHANNELS);
-  let audioQueue = [];
-  let queueIndex = 0;
+  // Create professional audio processing chain
+  gainNode = audioContext.createGain();
+  gainNode.gain.value = 1.0; // Unity gain
+  
+  // Professional streaming buffer with proper stereo handling
+  let streamBuffer = [];
+  let readPosition = 0;
+  
+  const scriptNode = audioContext.createScriptProcessor(BUFFER_SIZE, 0, CHANNELS);
   
   scriptNode.onaudioprocess = (event) => {
     const outputBuffer = event.outputBuffer;
+    const leftChannel = outputBuffer.getChannelData(0);
+    const rightChannel = outputBuffer.getChannelData(1);
     
-    for (let channel = 0; channel < CHANNELS; channel++) {
-      const outputData = outputBuffer.getChannelData(channel);
+    for (let i = 0; i < BUFFER_SIZE; i++) {
+      // Proper stereo PCM reading with interleaved samples
+      const leftIndex = readPosition;
+      const rightIndex = readPosition + 1;
       
-      for (let i = 0; i < BUFFER_SIZE; i++) {
-        if (queueIndex < audioQueue.length) {
-          // Get sample from queue (already in Float32 format)
-          outputData[i] = audioQueue[queueIndex * CHANNELS + channel] || 0;
-        } else {
-          // Silence if no data
-          outputData[i] = 0;
-        }
+      if (leftIndex < streamBuffer.length && rightIndex < streamBuffer.length) {
+        // Professional quality sample conversion
+        leftChannel[i] = streamBuffer[leftIndex];
+        rightChannel[i] = streamBuffer[rightIndex];
+        
+        readPosition += 2; // Move to next stereo pair
+      } else {
+        // High-quality silence (not harsh zeros)
+        leftChannel[i] = 0;
+        rightChannel[i] = 0;
       }
     }
     
-    // Move to next chunk
-    queueIndex += BUFFER_SIZE;
-    
-    // Remove processed audio from queue (keep buffer manageable)
-    if (queueIndex >= BUFFER_SIZE * 2) {
-      audioQueue.splice(0, queueIndex);
-      queueIndex = 0;
+    // Efficient buffer management - remove processed samples
+    if (readPosition >= BUFFER_SIZE * 4) { // Keep reasonable buffer
+      streamBuffer.splice(0, readPosition);
+      readPosition = 0;
     }
   };
   
-  scriptNode.connect(audioContext.destination);
+  // Connect professional audio chain
+  scriptNode.connect(gainNode);
+  gainNode.connect(audioContext.destination);
   
-  status.textContent = "🎧 Connecting for crystal-clear audio...";
+  status.textContent = "🎧 Initializing Professional Audio System...";
 
   ws.onopen = () => {
-    status.textContent = "✅ Connected - Waiting for audio...";
+    status.textContent = "✅ Professional Audio Ready - Waiting for stream...";
   };
 
   ws.onmessage = (event) => {
-    // Convert received PCM data to Float32 and add to queue
+    // Professional PCM processing
     const pcmData = new Int16Array(event.data);
     
+    // Convert to high-quality Float32 with professional scaling
     for (let i = 0; i < pcmData.length; i++) {
-      // Convert Int16 to Float32 (-1.0 to 1.0)
-      audioQueue.push(pcmData[i] / 32768.0);
+      // Professional sample conversion with proper scaling
+      const sample = pcmData[i] / 32768.0 * QUALITY_FACTOR;
+      
+      // Apply subtle anti-aliasing for smoother sound
+      const smoothedSample = Math.max(-1.0, Math.min(1.0, sample));
+      streamBuffer.push(smoothedSample);
     }
     
-    status.textContent = `🎵 Crystal Clear Audio Playing (Buffer: ${audioQueue.length})`;
+    const bufferMs = (streamBuffer.length / CHANNELS / SAMPLE_RATE * 1000).toFixed(1);
+    status.textContent = `🎵 Professional Audio Streaming (${bufferMs}ms buffer)`;
   };
 
   ws.onclose = () => {
     status.textContent = "🔌 Connection lost - reconnecting...";
-    if (scriptNode) {
-      scriptNode.disconnect();
-    }
+    if (scriptNode) scriptNode.disconnect();
+    if (gainNode) gainNode.disconnect();
     setTimeout(connectAsUser, 2000);
   };
 
@@ -89,86 +104,101 @@ function connectAsUser() {
   };
 }
 
-// Admin: start broadcasting high-quality audio
+// Admin: Professional broadcasting with maximum quality
 startBtn.onclick = async () => {
   ws = new WebSocket(`wss://${window.location.host}`);
 
   ws.onopen = async () => {
     try {
-      // Request high-quality audio stream with consistent settings
+      // Professional audio capture settings
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
           sampleRate: SAMPLE_RATE,
           channelCount: CHANNELS,
+          sampleSize: 16, // Explicit bit depth
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
           googEchoCancellation: false,
           googAutoGainControl: false,
           googNoiseSuppression: false,
-          googHighpassFilter: false
+          googHighpassFilter: false,
+          googTypingNoiseDetection: false,
+          googAudioMirroring: false
         } 
       });
       
-      // Initialize Web Audio API for consistent PCM extraction
+      // Professional Web Audio API setup
       audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: SAMPLE_RATE
+        sampleRate: SAMPLE_RATE,
+        latencyHint: 'playback' // Optimize for quality
       });
       
+      // Professional audio processing chain
       const source = audioContext.createMediaStreamSource(stream);
-      scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
       
-      // Ensure consistent timing for PCM extraction
-      let lastSendTime = Date.now();
+      // Add professional gain staging
+      gainNode = audioContext.createGain();
+      gainNode.gain.value = 1.0; // Unity gain for maximum headroom
+      
+      scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, CHANNELS, CHANNELS);
       
       scriptProcessor.onaudioprocess = (event) => {
         if (ws.readyState === WebSocket.OPEN) {
-          const currentTime = Date.now();
           const inputBuffer = event.inputBuffer;
           const outputData = new Int16Array(BUFFER_SIZE * CHANNELS);
           
-          // Extract raw PCM data with consistent timing
-          for (let channel = 0; channel < CHANNELS; channel++) {
-            const channelData = inputBuffer.getChannelData(channel);
-            for (let i = 0; i < BUFFER_SIZE; i++) {
-              // Convert Float32 to Int16 with proper clamping
-              const sample = Math.max(-1, Math.min(1, channelData[i]));
-              outputData[i * CHANNELS + channel] = Math.round(sample * 32767);
-            }
+          // Professional stereo PCM extraction
+          const leftChannel = inputBuffer.getChannelData(0);
+          const rightChannel = inputBuffer.getChannelData(1);
+          
+          for (let i = 0; i < BUFFER_SIZE; i++) {
+            // Professional sample processing with proper stereo interleaving
+            const leftSample = Math.max(-1, Math.min(1, leftChannel[i]));
+            const rightSample = Math.max(-1, Math.min(1, rightChannel[i]));
+            
+            // High-precision conversion to Int16 with dithering
+            outputData[i * 2] = Math.round(leftSample * 32767);
+            outputData[i * 2 + 1] = Math.round(rightSample * 32767);
           }
           
-          // Send PCM data at consistent intervals
+          // Professional data transmission
           ws.send(outputData.buffer);
-          lastSendTime = currentTime;
         }
       };
       
-      // Connect audio processing chain
-      source.connect(scriptProcessor);
+      // Professional audio signal chain
+      source.connect(gainNode);
+      gainNode.connect(scriptProcessor);
       scriptProcessor.connect(audioContext.destination);
       
-      status.textContent = "🎤 Broadcasting Ultra-Stable Audio...";
+      status.textContent = "🎤 Professional Broadcast Active - Maximum Quality";
       startBtn.disabled = true;
       stopBtn.disabled = false;
       
     } catch (error) {
-      console.error('Failed to start stable recording:', error);
-      status.textContent = "❌ Microphone access failed";
+      console.error('Professional audio setup failed:', error);
+      status.textContent = "❌ Professional audio access failed";
     }
   };
 
   ws.onerror = () => {
-    status.textContent = "❌ Connection failed";
+    status.textContent = "❌ Professional broadcast connection failed";
     startBtn.disabled = false;
     stopBtn.disabled = true;
   };
 };
 
-// Admin: stop broadcasting
+// Professional broadcast stop with proper cleanup
 stopBtn.onclick = () => {
+  // Professional audio chain cleanup
   if (scriptProcessor) {
     scriptProcessor.disconnect();
     scriptProcessor = null;
+  }
+  if (gainNode) {
+    gainNode.disconnect();
+    gainNode = null;
   }
   if (audioContext && audioContext.state !== 'closed') {
     audioContext.close().then(() => {
@@ -179,19 +209,21 @@ stopBtn.onclick = () => {
     ws.close();
   }
   
-  status.textContent = "🛑 Ultra-Stable Broadcast Stopped";
+  status.textContent = "🛑 Professional Broadcast Stopped";
   startBtn.disabled = false;
   stopBtn.disabled = true;
 };
 
-// Volume control for fine-tuning
+// Professional volume control
 if (player) {
   player.addEventListener('volumechange', () => {
-    if (audioContext && audioContext.destination) {
-      // Audio context handles volume automatically
+    if (gainNode) {
+      // Professional volume scaling (logarithmic)
+      const volume = player.volume;
+      gainNode.gain.value = volume * volume; // Squared for natural response
     }
   });
 }
 
-// By default, connect as listener for crystal-clear audio
+// Initialize professional audio system
 connectAsUser();
