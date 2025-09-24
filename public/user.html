@@ -240,12 +240,12 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // Simple continuous audio approach - using AudioWorklet for seamless playback
-    let audioQueue = [];
-    let audioElement = null;
+    // MediaSource-based continuous streaming
     let mediaSource = null;
     let sourceBuffer = null;
-    let sampleRate = 48000;
+    let audioQueue = [];
+    let isAppending = false;
+    let audioElement = null;
     
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
@@ -379,7 +379,7 @@
       });
     }
 
-    // Handle incoming PCM data - convert to WAV and play directly
+    // Handle incoming PCM data - queue and process smoothly
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
@@ -387,49 +387,72 @@
       // Update stats
       chunkStat.textContent = chunkCount;
       dataStat.textContent = formatBytes(totalBytes);
-      bufferStat.textContent = '100%'; // Always ready with direct playback
+      bufferStat.textContent = Math.min(audioQueue.length * 10, 100) + '%';
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes`);
+      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
       
-      // Convert PCM to WAV blob for immediate playback
-      if (isPlaying && audioElement) {
-        try {
-          const wavBlob = createWavBlob(arrayBuffer);
-          const audioUrl = URL.createObjectURL(wavBlob);
-          
-          // Play immediately
-          audioElement.src = audioUrl;
-          audioElement.play().catch(e => {
-            console.log('⚠️ Playback issue:', e);
-          });
-          
-          // Cleanup after playback
-          setTimeout(() => {
-            URL.revokeObjectURL(audioUrl);
-          }, 2000);
-          
-          // Animate visualizer
-          const pcmData = new Int16Array(arrayBuffer);
-          const floatData = new Float32Array(pcmData.length);
-          for (let i = 0; i < pcmData.length; i++) {
-            floatData[i] = pcmData[i] / 32768.0;
-          }
-          animateVisualizer(floatData);
-          
-        } catch (error) {
-          console.error('❌ Audio conversion error:', error);
+      // Add to queue for smooth processing
+      audioQueue.push(arrayBuffer);
+      
+      // Animate visualizer
+      if (isPlaying) {
+        const pcmData = new Int16Array(arrayBuffer);
+        const floatData = new Float32Array(pcmData.length);
+        for (let i = 0; i < pcmData.length; i++) {
+          floatData[i] = pcmData[i] / 32768.0;
         }
+        animateVisualizer(floatData);
       }
       
       // Auto-enable play after receiving some data
       if (chunkCount === 2 && !isPlaying) {
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
+      
+      // Start processing if ready
+      if (isPlaying && !isProcessing && audioQueue.length >= 2) {
+        processAudioQueue();
+      }
+      
+      // Keep queue manageable
+      if (audioQueue.length > 10) {
+        console.log('🗑️ Queue too large, trimming');
+        audioQueue = audioQueue.slice(-8);
+      }
     }
 
-    // Create WAV blob from PCM data
-    function createWavBlob(pcmBuffer) {
-      const pcmData = new Int16Array(pcmBuffer);
+    // Process audio queue smoothly without breaking
+    // Direct Web Audio API streaming without buffering
+    function processIncomingAudio(pcmBuffer) {
+      if (!audioContext || !gainNode || !isPlaying) return;
+      
+      try {
+        const pcmData = new Int16Array(pcmBuffer);
+        const floatData = new Float32Array(pcmData.length);
+        
+        // Convert Int16 to Float32 for Web Audio API
+        for (let i = 0; i < pcmData.length; i++) {
+          floatData[i] = pcmData[i] / 32768.0;
+        }
+        
+        // Create and play audio buffer immediately
+        const audioBuffer = audioContext.createBuffer(1, floatData.length, 48000);
+        audioBuffer.getChannelData(0).set(floatData);
+        
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(gainNode);
+        source.start(audioContext.currentTime);
+        
+        console.log(`🎵 Direct audio: ${pcmData.length} samples`);
+        
+      } catch (error) {
+        console.error('❌ Direct audio error:', error);
+      }
+    }
+
+    // Create WAV blob from Int16 PCM data
+    function createWavBlobFromInt16(pcmData) {
       const length = pcmData.length;
       const buffer = new ArrayBuffer(44 + length * 2);
       const view = new DataView(buffer);
@@ -473,6 +496,7 @@
         if (isPlaying) {
           // Stop playing
           isPlaying = false;
+          isProcessing = false;
           playBtn.textContent = '▶️';
           updateStatus('⏸️ Audio paused', 'success');
           
@@ -485,6 +509,11 @@
           isPlaying = true;
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing live radio!', 'success');
+          
+          // Start processing if we have data
+          if (audioQueue.length > 0) {
+            processAudioQueue();
+          }
         }
         
       } catch (error) {
@@ -515,6 +544,7 @@
     function stopRadio() {
       isStreaming = false;
       isPlaying = false;
+      isProcessing = false;
       
       // Stop and cleanup audio element
       if (audioElement) {
@@ -545,7 +575,7 @@
       updateStatus('⏹️ Radio stopped');
       connectionStat.textContent = '❌';
       
-      console.log('⏹️ Simple radio streaming stopped');
+      console.log('⏹️ Smooth radio streaming stopped');
     }
 
     // Update status display
