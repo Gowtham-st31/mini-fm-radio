@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -252,6 +254,11 @@
     window.silenceCount = 0;
     window.audioCount = 0;
     
+    // Auto-recovery system for audio breaking
+    window.lastAudioTime = 0;
+    window.audioBreakDetected = false;
+    window.consecutiveGoodChunks = 0;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -391,7 +398,7 @@
       });
     }
 
-    // Handle incoming PCM data with admin pause detection
+    // Handle incoming PCM data with automatic break detection
     async function handlePCMData(arrayBuffer) {
       chunkCount++;
       totalBytes += arrayBuffer.byteLength;
@@ -401,7 +408,50 @@
       dataStat.textContent = formatBytes(totalBytes);
       bufferStat.textContent = Math.min(audioQueue.length * 5, 100) + '%';
       
-      console.log(`📡 Received PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}`);
+      const currentTime = Date.now();
+      
+      // Detect audio breaks - if chunks are coming too slowly or irregularly
+      if (window.lastAudioTime > 0) {
+        const timeDiff = currentTime - window.lastAudioTime;
+        
+        // If chunk arrives more than 200ms late, it might cause breaking
+        if (timeDiff > 200) {
+          window.audioBreakDetected = true;
+          window.consecutiveGoodChunks = 0;
+          
+          console.log(`⚠️ Audio break detected! Chunk delayed by ${timeDiff}ms - auto-recovery in 1 sec`);
+          
+          // Immediate recovery - clear buffers and reset timing
+          audioQueue = audioQueue.slice(-2); // Keep only 2 most recent chunks
+          
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.05; // Quick restart
+          }
+          
+          updateStatus('� Auto-recovering from audio break...', 'streaming');
+          
+          // Mark recovery complete after 1 second
+          setTimeout(() => {
+            if (window.consecutiveGoodChunks >= 3) {
+              window.audioBreakDetected = false;
+              updateStatus('✅ Audio recovered - streaming smoothly!', 'success');
+              console.log('✅ Auto-recovery complete - audio stable');
+            }
+          }, 1000);
+        } else if (timeDiff < 150) {
+          // Good timing - increment recovery counter
+          window.consecutiveGoodChunks++;
+          if (window.audioBreakDetected && window.consecutiveGoodChunks >= 5) {
+            window.audioBreakDetected = false;
+            updateStatus('🔴 LIVE - Audio recovered!', 'success');
+            console.log('🎵 Audio break resolved - back to normal streaming');
+          }
+        }
+      }
+      
+      window.lastAudioTime = currentTime;
+      
+      console.log(`📡 PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}, delay: ${window.lastAudioTime ? currentTime - window.lastAudioTime : 0}ms`);
       
       // Convert ArrayBuffer to Float32Array for audio processing
       const pcmData = new Int16Array(arrayBuffer);
@@ -459,8 +509,16 @@
         }
       }
       
-      // Add to audio queue
-      audioQueue.push(floatData);
+      // Add to audio queue (but limit size during recovery)
+      if (window.audioBreakDetected) {
+        // During recovery, keep queue very small
+        if (audioQueue.length < 3) {
+          audioQueue.push(floatData);
+        }
+      } else {
+        // Normal operation
+        audioQueue.push(floatData);
+      }
       
       // Animate visualizer with actual audio data
       if (isPlaying) {
@@ -499,14 +557,33 @@
       }
     }
 
-    // Gentler scheduling with less aggressive timing
+    // Enhanced scheduling with automatic break recovery
     function scheduleAudio() {
       const currentTime = audioContext.currentTime;
       
-      // Only catch up if we're really far behind (more tolerance)
-      if (nextNoteTime < currentTime - 0.2) {
-        console.log('🔄 Audio timing significantly behind - gentle catch up');
-        nextNoteTime = currentTime + 0.05; // Smaller jump
+      // Enhanced break detection during scheduling
+      if (nextNoteTime < currentTime - 0.3) {
+        console.log('🚨 SEVERE audio timing break detected - immediate recovery!');
+        
+        // Immediate recovery action
+        audioQueue = []; // Clear all stale audio
+        nextNoteTime = currentTime + 0.02; // Very quick restart
+        
+        window.audioBreakDetected = true;
+        window.consecutiveGoodChunks = 0;
+        
+        updateStatus('🔧 Breaking detected - auto-clearing...', 'streaming');
+        
+        // Reset after 1 second
+        setTimeout(() => {
+          if (isPlaying) {
+            updateStatus('✅ Auto-recovery complete!', 'success');
+          }
+        }, 1000);
+        
+      } else if (nextNoteTime < currentTime - 0.1) {
+        console.log('🔄 Minor audio timing lag - gentle catch up');
+        nextNoteTime = currentTime + 0.03; // Quick catch up
       }
       
       // Schedule audio chunks while we're ahead of time and have data
@@ -583,16 +660,19 @@
           
           nextNoteTime = audioContext.currentTime + 0.1; // Quick start
           
-          // Reset detection counters
+          // Reset all detection systems including auto-recovery
           window.adminPaused = false;
           window.pauseStartTime = 0;
           window.silenceCount = 0;
           window.audioCount = 0;
+          window.lastAudioTime = Date.now();
+          window.audioBreakDetected = false;
+          window.consecutiveGoodChunks = 0;
           
           playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing live radio!', 'success');
+          updateStatus('🎵 Playing with auto-recovery enabled!', 'success');
           
-          console.log('🎧 Audio playback started - gentle reset');
+          console.log('🎧 Audio playback started with break detection enabled');
           
           // Start the audio scheduling loop
           scheduleAudio();
