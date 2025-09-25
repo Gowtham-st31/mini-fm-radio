@@ -1,6 +1,3 @@
-
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -708,10 +705,10 @@
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Keep queue optimized for ultra-smooth playback
-      if (audioQueue.length > 20) {
-        console.log('🗑️ Queue optimization - maintaining smooth buffer');
-        audioQueue = audioQueue.slice(-15); // Keep even more chunks for ultra-smooth audio
+      // Keep queue optimized for ultra-smooth playbook with larger buffer
+      if (audioQueue.length > 25) {
+        console.log('🗑️ Queue optimization - maintaining large smooth buffer');
+        audioQueue = audioQueue.slice(-20); // Keep even more chunks for ultra-smooth audio
       }
     }
 
@@ -752,7 +749,7 @@
       
       // Schedule multiple chunks ahead for smoother playback
       let scheduled = 0;
-      const maxSchedule = audioQueue.length > 5 ? 4 : 2; // More when queue is full
+      const maxSchedule = 6; // Always keep 6 chunks scheduled for smoothness
       
       while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < maxSchedule) {
         playAudioAtTime(nextNoteTime);
@@ -767,7 +764,7 @@
       // Continue scheduling with consistent timing
       if (isPlaying) {
         // Use setTimeout for more consistent scheduling
-        setTimeout(scheduleAudio, 20); // 20ms intervals for ultra-smooth scheduling
+        setTimeout(scheduleAudio, 15); // 15ms intervals for ultra-smooth scheduling
       }
     }
 
@@ -782,8 +779,8 @@
         const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
         
-        // Apply windowing to reduce clicks/pops for better quality
-        const windowSize = Math.min(64, audioData.length / 4);
+        // Apply more aggressive windowing to eliminate any clicks/pops
+        const windowSize = Math.min(128, audioData.length / 3); // Larger window size
         const windowedData = new Float32Array(audioData.length);
         
         for (let i = 0; i < audioData.length; i++) {
@@ -817,8 +814,8 @@
         
         source.start(time);
         
-        // Update next time with ultra-precise calculation for no gaps
-        nextNoteTime = time + audioBuffer.duration - 0.001; // Tiny overlap to prevent gaps
+        // Update next time with aggressive overlap for zero gaps
+        nextNoteTime = time + audioBuffer.duration - 0.002; // Larger overlap to prevent any gaps
         
         console.log(`🎵 HD Audio scheduled at ${time.toFixed(4)}s, next: ${nextNoteTime.toFixed(4)}s, queue: ${audioQueue.length}`);
         
@@ -843,12 +840,12 @@
         const timeSinceChunkReceived = currentTime - window.lastChunkReceived;
         
         // Less aggressive detection to prevent unnecessary breaking
-        if (timeSinceLastAudio > 1000 && audioQueue.length < 2 && !window.adminPageLeft) {
-          console.log('🔧 AUTO-RECOVERY: Audio starving detected - gentle reset');
+        if (timeSinceLastAudio > 2000 && audioQueue.length < 1 && !window.adminPageLeft) {
+          console.log('🔧 AUTO-RECOVERY: Audio completely starved - gentle reset');
           forceAudioReset('Audio starvation detected');
           
-        } else if (timeSinceLastChunk > 2000 && !window.adminPageLeft) {
-          console.log('🔧 AUTO-RECOVERY: No chunks for 2+ sec - gentle reset');
+        } else if (timeSinceLastChunk > 3000 && !window.adminPageLeft) {
+          console.log('🔧 AUTO-RECOVERY: No chunks for 3+ sec - gentle reset');
           forceAudioReset('Chunk starvation detected');
           
         } else if (timeSinceChunkReceived > 5000 && !window.adminPageLeft) {
@@ -877,7 +874,7 @@
           }
         }
         
-      }, 500); // Check every 500ms for gentler recovery
+      }, 1000); // Check every 1000ms for much gentler recovery
     }
     
     // Force immediate audio reset (like admin restart but without waiting)
