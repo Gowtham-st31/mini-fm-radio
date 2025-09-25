@@ -289,6 +289,12 @@
     window.wakeLock = null;
     window.backgroundAudioActive = false;
     
+    // WebSocket connection stability
+    window.connectionHeartbeat = null;
+    window.reconnectAttempts = 0;
+    window.maxReconnectAttempts = 5;
+    window.reconnectDelay = 2000;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const backgroundStatus = document.getElementById('backgroundStatus');
@@ -437,19 +443,46 @@
           websocket.onopen = () => {
             console.log('✅ WebSocket connected');
             connectionStat.textContent = '✅';
+            window.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+            startConnectionHeartbeat(); // Start heartbeat to maintain connection
             resolve();
           };
           
           websocket.onmessage = async (event) => {
             if (isStreaming) {
-              await handlePCMData(event.data);
+              // Handle heartbeat pong responses
+              if (typeof event.data === 'string' && event.data === 'pong') {
+                console.log('💗 Received heartbeat pong');
+                return;
+              }
+              
+              // Handle binary PCM data
+              if (event.data instanceof ArrayBuffer) {
+                await handlePCMData(event.data);
+              }
             }
           };
           
-          websocket.onclose = () => {
-            console.log('❌ WebSocket disconnected');
-            updateStatus('❌ Connection lost', 'error');
-            connectionStat.textContent = '❌';
+          websocket.onclose = (event) => {
+            console.log('❌ WebSocket disconnected:', event.code, event.reason);
+            stopConnectionHeartbeat();
+            
+            // Only attempt reconnection if we were streaming and it wasn't a manual disconnect
+            if (isStreaming && event.code !== 1000 && window.reconnectAttempts < window.maxReconnectAttempts) {
+              console.log(`🔄 Attempting reconnection ${window.reconnectAttempts + 1}/${window.maxReconnectAttempts}`);
+              updateStatus(`🔄 Reconnecting... (${window.reconnectAttempts + 1}/${window.maxReconnectAttempts})`, 'streaming');
+              
+              setTimeout(() => {
+                window.reconnectAttempts++;
+                reconnectWebSocket();
+              }, window.reconnectDelay);
+              
+              // Increase delay for next attempt (exponential backoff)
+              window.reconnectDelay = Math.min(window.reconnectDelay * 1.5, 10000);
+            } else {
+              updateStatus('❌ Connection lost', 'error');
+              connectionStat.textContent = '❌';
+            }
           };
           
           websocket.onerror = (error) => {
@@ -464,6 +497,48 @@
           reject(error);
         }
       });
+    }
+
+    // Start connection heartbeat to prevent disconnections
+    function startConnectionHeartbeat() {
+      stopConnectionHeartbeat(); // Clear any existing heartbeat
+      
+      window.connectionHeartbeat = setInterval(() => {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          // Send a ping to keep connection alive
+          try {
+            websocket.send('ping');
+          } catch (error) {
+            console.log('⚠️ Heartbeat failed:', error);
+            stopConnectionHeartbeat();
+          }
+        } else {
+          stopConnectionHeartbeat();
+        }
+      }, 30000); // Send heartbeat every 30 seconds
+    }
+    
+    // Stop connection heartbeat
+    function stopConnectionHeartbeat() {
+      if (window.connectionHeartbeat) {
+        clearInterval(window.connectionHeartbeat);
+        window.connectionHeartbeat = null;
+      }
+    }
+    
+    // Reconnect WebSocket
+    async function reconnectWebSocket() {
+      try {
+        if (websocket) {
+          websocket.close();
+        }
+        await connectWebSocket();
+        console.log('✅ WebSocket reconnected successfully');
+        updateStatus('✅ Reconnected to server!', 'success');
+      } catch (error) {
+        console.error('❌ Reconnection failed:', error);
+        // The onclose handler will trigger another reconnect attempt if needed
+      }
     }
 
     // Handle incoming PCM data with automatic break detection
@@ -810,10 +885,8 @@
             sample *= windowVal;
           }
           
-          // Additional DC removal to prevent low-frequency noise
-          if (i > 0) {
-            sample = sample - (sample + windowedData[i-1]) * 0.001; // Gentle DC blocking
-          }
+          // Don't apply DC blocking in sample processing - it can cause artifacts
+          // DC blocking is better handled by the audio hardware
           
           windowedData[i] = sample;
         }
@@ -1059,15 +1132,25 @@
         audioContext = null;
       }
       
-      // Close WebSocket
+      // Close WebSocket and stop heartbeat
       if (websocket) {
         websocket.close();
+      }
+      stopConnectionHeartbeat();
+      
+      // Stop background audio mode if active
+      if (window.backgroundAudioActive) {
+        stopBackgroundAudioMode();
       }
       
       // Reset variables
       gainNode = null;
       chunkCount = 0;
       totalBytes = 0;
+      
+      // Reset connection variables
+      window.reconnectAttempts = 0;
+      window.reconnectDelay = 2000;
       
       // Reset all detection systems
       window.adminPaused = false;
@@ -1136,6 +1219,7 @@
       if (audioContext) audioContext.close();
       if (window.wakeLock) window.wakeLock.release();
       if (window.backgroundKeepAlive) clearInterval(window.backgroundKeepAlive);
+      stopConnectionHeartbeat();
     });
     
     // Handle page visibility changes with ultra-aggressive background audio
@@ -1222,7 +1306,7 @@
       // ULTRA aggressive keep-alive interval to prevent ANY audio breaking
       window.backgroundKeepAlive = setInterval(() => {
         if (isPlaying && audioContext) {
-          // Always ensure audio context is running
+          // Always ensure audio context is running - but more gently
           if (audioContext.state !== 'running') {
             console.log('🔄 Force resuming audio context in background');
             audioContext.resume().catch(e => console.log('Resume failed:', e));
@@ -1250,21 +1334,8 @@
             }
           }
           
-          // Create ultra-quiet dummy audio to prevent context suspension without adding noise
-          try {
-            const dummyBuffer = audioContext.createBuffer(1, 32, audioContext.sampleRate); // Smaller buffer
-            const dummySource = audioContext.createBufferSource();
-            const dummyGain = audioContext.createGain();
-            
-            dummySource.buffer = dummyBuffer;
-            dummyGain.gain.value = 0.00001; // Ultra-quiet to prevent any audible artifacts
-            
-            dummySource.connect(dummyGain);
-            dummyGain.connect(audioContext.destination);
-            dummySource.start();
-          } catch (e) {
-            // Continue even if dummy audio fails - better to avoid potential noise
-          }
+          // Don't create dummy audio - it can cause noise
+          // Instead, just ensure scheduling continues aggressively
         }
         
         // Force audio data processing even in background
@@ -1359,4 +1430,3 @@
   </script>
 </body>
 </html>
-
