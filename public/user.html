@@ -414,26 +414,37 @@
         maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
       }
       
-      // Detect admin pause/resume pattern
+      // Detect admin pause/resume pattern with aggressive reset
       if (maxAmplitude < 0.001) {
         // Silence detected - admin might have paused
         if (!window.adminPaused) {
           window.adminPaused = true;
           window.pauseStartTime = Date.now();
-          console.log('🔇 Admin pause detected - preparing for restart');
+          console.log('🔇 Admin pause detected - clearing audio buffers');
+          
+          // Immediately clear audio queue to prevent stale audio
+          audioQueue = [];
+          
+          // Update UI to show pause state
+          updateStatus('⏸️ Admin paused - waiting for resume...', 'streaming');
         }
       } else {
-        // Audio detected
+        // Audio detected - check for resume
         if (window.adminPaused) {
-          // Admin resumed - reset audio system for smooth restart
+          // Admin resumed - complete audio system restart
           window.adminPaused = false;
           const pauseDuration = Date.now() - window.pauseStartTime;
           
-          if (pauseDuration > 500) { // Only reset if paused for more than 0.5s
-            console.log('🔄 Admin resumed - resetting audio timing');
-            resetAudioTiming();
-            updateStatus('🔴 LIVE - Audio resumed!', 'success');
-          }
+          console.log('🔄 Admin resumed after ' + pauseDuration + 'ms - full restart');
+          
+          // Complete restart - clear everything and reset timing
+          audioQueue = []; // Clear all old audio
+          nextNoteTime = audioContext.currentTime + 0.2; // Fresh start with buffer
+          
+          // Reset pause detection variables
+          window.pauseStartTime = 0;
+          
+          updateStatus('🔴 LIVE - Stream restarted successfully!', 'success');
         }
       }
       
@@ -477,10 +488,18 @@
       }
     }
 
-    // Schedule and play audio continuously
+    // Enhanced scheduling with gap detection and recovery
     function scheduleAudio() {
-      // Look ahead and schedule audio
-      while (nextNoteTime < audioContext.currentTime + scheduleAheadTime && audioQueue.length > 0) {
+      const currentTime = audioContext.currentTime;
+      
+      // Detect if we're falling behind and need to catch up
+      if (nextNoteTime < currentTime - 0.1) {
+        console.log('🔄 Audio timing behind - catching up');
+        nextNoteTime = currentTime + 0.1; // Skip ahead to catch up
+      }
+      
+      // Schedule audio chunks while we're ahead of time and have data
+      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0) {
         playAudioAtTime(nextNoteTime);
       }
       
@@ -539,20 +558,23 @@
           updateStatus('⏸️ Audio paused', 'success');
           
         } else {
-          // Start playing with fresh timing
+          // Start playing with complete reset for admin pause handling
           if (audioContext.state === 'suspended') {
             await audioContext.resume();
           }
           
           isPlaying = true;
           
-          // Reset timing and clear any stale data
-          nextNoteTime = audioContext.currentTime + 0.1;
-          audioQueue = audioQueue.slice(-5); // Keep only recent audio
+          // Complete reset - especially important after admin pause/resume
+          audioQueue = []; // Clear ALL audio data for fresh start
+          nextNoteTime = audioContext.currentTime + 0.2; // Longer initial delay
           window.adminPaused = false;
+          window.pauseStartTime = 0;
           
           playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing live radio!', 'success');
+          updateStatus('🎵 Playing live radio with fresh timing!', 'success');
+          
+          console.log('🎧 Audio playback started with complete reset');
           
           // Start the audio scheduling loop
           scheduleAudio();
