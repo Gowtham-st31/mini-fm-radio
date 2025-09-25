@@ -278,6 +278,11 @@
     window.lastChunkReceived = 0;
     window.noChunksTimeout = null;
     
+    // User page visibility detection
+    window.userPageVisible = true;
+    window.audioContextSuspended = false;
+    window.resumeAttempts = 0;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -395,10 +400,80 @@
         
         console.log('🎧 PCM radio streaming started');
         
+        // Add page visibility listeners for user page switching
+        addPageVisibilityListeners();
+        
       } catch (error) {
         console.error('❌ Failed to start radio:', error);
         updateStatus('❌ Failed to start: ' + error.message, 'error');
       }
+    }
+
+    // Add page visibility listeners to handle user switching tabs/minimizing
+    function addPageVisibilityListeners() {
+      // Handle page visibility change
+      document.addEventListener('visibilitychange', async () => {
+        if (document.hidden) {
+          // User switched away from page
+          window.userPageVisible = false;
+          console.log('👤 User switched away from page - maintaining audio...');
+          
+          // Try to keep audio context running
+          if (audioContext && audioContext.state === 'running') {
+            console.log('🎵 Audio context still running - audio should continue');
+          }
+          
+        } else {
+          // User returned to page
+          window.userPageVisible = true;
+          console.log('👤 User returned to page - checking audio...');
+          
+          // Resume audio context if it was suspended
+          if (audioContext && audioContext.state === 'suspended') {
+            console.log('🔄 Audio context suspended - attempting resume...');
+            try {
+              await audioContext.resume();
+              console.log('✅ Audio context resumed successfully');
+              updateStatus('👤 Welcome back! Audio resumed.', 'success');
+              
+              // Reset timing to prevent breaks
+              if (isPlaying) {
+                nextNoteTime = audioContext.currentTime + 0.05;
+                window.lastGoodAudioTime = Date.now();
+              }
+              
+            } catch (error) {
+              console.error('❌ Failed to resume audio context:', error);
+              updateStatus('❌ Audio resume failed - click play', 'error');
+            }
+          }
+        }
+      });
+      
+      // Handle window focus/blur events (additional detection)
+      window.addEventListener('focus', async () => {
+        if (!window.userPageVisible) {
+          window.userPageVisible = true;
+          console.log('👤 Window focused - checking audio state...');
+          
+          // Check if audio context needs resuming
+          if (audioContext && audioContext.state === 'suspended' && isPlaying) {
+            try {
+              await audioContext.resume();
+              console.log('✅ Audio resumed on window focus');
+              nextNoteTime = audioContext.currentTime + 0.03;
+              updateStatus('🔴 LIVE - Audio resumed!', 'success');
+            } catch (error) {
+              console.error('❌ Audio resume failed on focus:', error);
+            }
+          }
+        }
+      });
+      
+      window.addEventListener('blur', () => {
+        window.userPageVisible = false;
+        console.log('👤 Window blurred - audio may be throttled...');
+      });
     }
 
     // Connect to WebSocket
@@ -723,6 +798,24 @@
 
     // Enhanced scheduling with more aggressive break recovery
     function scheduleAudio() {
+      // Check if audio context is suspended
+      if (audioContext.state === 'suspended') {
+        console.log('⏸️ Audio context suspended - attempting auto-resume...');
+        audioContext.resume().then(() => {
+          console.log('✅ Audio context auto-resumed');
+          nextNoteTime = audioContext.currentTime + 0.02;
+          window.lastGoodAudioTime = Date.now();
+        }).catch(error => {
+          console.error('❌ Auto-resume failed:', error);
+        });
+        
+        // Continue scheduling loop
+        if (isPlaying) {
+          requestAnimationFrame(scheduleAudio);
+        }
+        return;
+      }
+      
       const currentTime = audioContext.currentTime;
       
       // Super aggressive break detection during scheduling
@@ -820,6 +913,29 @@
       
       window.autoRecoveryInterval = setInterval(() => {
         if (!isStreaming || !isPlaying) return;
+        
+        // Check if audio context is suspended (user switched pages)
+        if (audioContext && audioContext.state === 'suspended' && window.userPageVisible) {
+          console.log('🔄 Audio context suspended but page visible - attempting resume...');
+          window.audioContextSuspended = true;
+          window.resumeAttempts++;
+          
+          audioContext.resume().then(() => {
+            console.log('✅ Audio context resumed in monitoring');
+            window.audioContextSuspended = false;
+            window.resumeAttempts = 0;
+            nextNoteTime = audioContext.currentTime + 0.02;
+            updateStatus('🔴 LIVE - Audio recovered from suspension!', 'success');
+          }).catch(error => {
+            console.error('❌ Failed to resume in monitoring:', error);
+            if (window.resumeAttempts >= 3) {
+              updateStatus('❌ Audio suspended - click play to resume', 'error');
+              window.resumeAttempts = 0;
+            }
+          });
+          
+          return; // Skip other checks while handling suspension
+        }
         
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
@@ -933,10 +1049,15 @@
         } else {
           // Start playing with minimal disruption
           if (audioContext.state === 'suspended') {
+            console.log('🔄 Resuming suspended audio context...');
             await audioContext.resume();
+            console.log('✅ Audio context resumed');
           }
           
           isPlaying = true;
+          window.userPageVisible = true; // Mark as visible when user interacts
+          window.audioContextSuspended = false;
+          window.resumeAttempts = 0;
           
           // Much gentler reset - don't clear everything unless necessary
           if (audioQueue.length > 10) {
@@ -976,6 +1097,18 @@
           
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing HD audio with auto-recovery!', 'success');
+          
+          // Show tip about background audio
+          setTimeout(() => {
+            if (isPlaying) {
+              updateStatus('💡 TIP: Audio continues when you switch tabs!', 'success');
+              setTimeout(() => {
+                if (isPlaying) {
+                  updateStatus('🔴 LIVE - HD Audio streaming!', 'success');
+                }
+              }, 3000);
+            }
+          }, 2000);
           
           console.log('🎧 HD Audio playback started with break detection enabled');
           
@@ -1037,6 +1170,9 @@
       window.consecutiveGoodChunks = 0;
       window.severeBreakCount = 0;
       window.lastGoodAudioTime = 0;
+      window.userPageVisible = true;
+      window.audioContextSuspended = false;
+      window.resumeAttempts = 0;
       
       // Clear any pending timeouts and intervals
       if (window.noAudioTimeout) {
