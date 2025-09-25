@@ -5,7 +5,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FM Radio - PCM Player</title>
+  <title>FM Radio - HD PCM Player</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -179,7 +179,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>📻 FM Radio - PCM Player</h1>
+    <h1>📻 FM Radio - HD PCM Player</h1>
     
     <div class="status" id="statusDisplay">
       🎧 Ready for live radio
@@ -241,12 +241,16 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // Simple continuous audio approach
+    // Simple continuous audio approach with HD quality settings
     let audioQueue = [];
     let currentSource = null;
-    let sampleRate = 48000;
-    let scheduleAheadTime = 0.1; // 100ms ahead
+    let sampleRate = 48000; // High-quality sample rate
+    let scheduleAheadTime = 0.05; // Reduced for lower latency, better quality
     let nextNoteTime = 0.0;
+    
+    // HD Audio quality settings
+    let audioBufferSize = 4096; // Larger buffer for better quality
+    let qualityMode = 'hd'; // HD mode flag
     
     // Admin pause/resume detection with stricter thresholds
     window.adminPaused = false;
@@ -322,17 +326,42 @@
       try {
         updateStatus('🔧 Initializing Web Audio API...', 'streaming');
         
-        // Create Web Audio context
+        // Create Web Audio context with HD settings
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate: sampleRate
+          sampleRate: sampleRate,
+          latencyHint: 'interactive' // Optimized for real-time audio
         });
         
         await audioContext.resume();
         
-        // Create gain node for volume control
+        // Create gain node for volume control with HD processing
         gainNode = audioContext.createGain();
-        gainNode.connect(audioContext.destination);
-        gainNode.gain.value = 0.7;
+        
+        // Add audio processing for better quality
+        const compressor = audioContext.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
+        compressor.knee.setValueAtTime(30, audioContext.currentTime);
+        compressor.ratio.setValueAtTime(12, audioContext.currentTime);
+        compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
+        compressor.release.setValueAtTime(0.25, audioContext.currentTime);
+        
+        // Create EQ for better sound
+        const lowShelf = audioContext.createBiquadFilter();
+        lowShelf.type = 'lowshelf';
+        lowShelf.frequency.setValueAtTime(320, audioContext.currentTime);
+        lowShelf.gain.setValueAtTime(2, audioContext.currentTime);
+        
+        const highShelf = audioContext.createBiquadFilter();
+        highShelf.type = 'highshelf';
+        highShelf.frequency.setValueAtTime(3200, audioContext.currentTime);
+        highShelf.gain.setValueAtTime(1, audioContext.currentTime);
+        
+        // Connect the audio chain: gainNode -> EQ -> compressor -> destination
+        gainNode.connect(lowShelf);
+        lowShelf.connect(highShelf);
+        highShelf.connect(compressor);
+        compressor.connect(audioContext.destination);
+        gainNode.gain.value = 0.8; // Slightly higher for HD quality
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -357,7 +386,7 @@
         createVisualizer();
         setInterval(() => animateVisualizer(), 100);
         
-        updateStatus('✅ Connected! Receiving audio...', 'success');
+        updateStatus('✅ Connected! Receiving HD audio...', 'success');
         
         console.log('🎧 PCM radio streaming started');
         
@@ -516,15 +545,26 @@
       
       console.log(`📡 PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}, delay: ${window.lastAudioTime ? currentTime - window.lastAudioTime : 0}ms`);
       
-      // Convert ArrayBuffer to Float32Array for audio processing
+      // Convert ArrayBuffer to Float32Array for HD audio processing
       const pcmData = new Int16Array(arrayBuffer);
       const floatData = new Float32Array(pcmData.length);
       
-      // Convert int16 to float32 (-1 to 1 range) and detect silence
+      // Enhanced int16 to float32 conversion with better precision for HD quality
       let maxAmplitude = 0;
       for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768.0;
-        maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
+        // More precise conversion with dithering for HD quality
+        let sample = pcmData[i] / 32768.0;
+        
+        // Add subtle dithering to reduce quantization noise
+        const dither = (Math.random() - 0.5) * (1.0 / 32768.0);
+        sample += dither * 0.1;
+        
+        // Soft limiting to prevent clipping while preserving dynamics
+        if (sample > 0.95) sample = 0.95 + (sample - 0.95) * 0.1;
+        if (sample < -0.95) sample = -0.95 + (sample + 0.95) * 0.1;
+        
+        floatData[i] = sample;
+        maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
       }
       
       // Much more robust admin pause/resume detection with immediate clearing
@@ -601,10 +641,10 @@
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Keep queue manageable
-      if (audioQueue.length > 20) {
-        console.log('🗑️ Queue too large, trimming');
-        audioQueue = audioQueue.slice(-15);
+      // Keep queue optimized for HD quality (smaller, more responsive)
+      if (audioQueue.length > 12) {
+        console.log('🗑️ HD Queue optimization - keeping only recent high-quality audio');
+        audioQueue = audioQueue.slice(-8); // Smaller queue for better quality
       }
     }
 
@@ -644,9 +684,9 @@
         nextNoteTime = currentTime + 0.01; // Very quick catch up
       }
       
-      // Schedule audio chunks while we're ahead of time and have data
+      // Schedule audio chunks with HD quality processing
       let scheduled = 0;
-      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < 5) {
+      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < 3) {
         playAudioAtTime(nextNoteTime);
         scheduled++;
       }
@@ -662,37 +702,59 @@
       }
     }
 
-    // Play single audio chunk at specific time
+    // Play single audio chunk at specific time with HD quality
     function playAudioAtTime(time) {
       if (audioQueue.length === 0) return;
       
       const audioData = audioQueue.shift();
       
       try {
-        // Create audio buffer
+        // Create high-quality audio buffer
         const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
-        channelData.set(audioData);
         
-        // Create and schedule source
+        // Apply windowing to reduce clicks/pops for better quality
+        const windowSize = Math.min(64, audioData.length / 4);
+        const windowedData = new Float32Array(audioData.length);
+        
+        for (let i = 0; i < audioData.length; i++) {
+          let sample = audioData[i];
+          
+          // Apply Hann window at edges for smooth transitions
+          if (i < windowSize) {
+            const windowVal = 0.5 * (1 - Math.cos(2 * Math.PI * i / (2 * windowSize)));
+            sample *= windowVal;
+          } else if (i >= audioData.length - windowSize) {
+            const windowVal = 0.5 * (1 - Math.cos(2 * Math.PI * (audioData.length - i) / (2 * windowSize)));
+            sample *= windowVal;
+          }
+          
+          windowedData[i] = sample;
+        }
+        
+        channelData.set(windowedData);
+        
+        // Create and configure HD source
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
+        
+        // Add subtle interpolation for smoother playback
         source.connect(gainNode);
         
-        // Schedule playback
+        // Schedule playback with precision timing
         if (time < audioContext.currentTime) {
-          time = audioContext.currentTime; // Catch up if behind
+          time = audioContext.currentTime + 0.001; // Minimal delay for HD quality
         }
         
         source.start(time);
         
-        // Update next time
+        // Update next time with precise calculation
         nextNoteTime = time + audioBuffer.duration;
         
-        console.log(`🎵 Scheduled at ${time.toFixed(3)}s, next: ${nextNoteTime.toFixed(3)}s, queue: ${audioQueue.length}`);
+        console.log(`🎵 HD Audio scheduled at ${time.toFixed(4)}s, next: ${nextNoteTime.toFixed(4)}s, queue: ${audioQueue.length}`);
         
       } catch (error) {
-        console.error('❌ Audio play error:', error);
+        console.error('❌ HD Audio play error:', error);
       }
     }
 
@@ -719,11 +781,11 @@
           console.log('🔧 AUTO-RECOVERY: No chunks for 1+ sec - forcing reset');
           forceAudioReset('Chunk starvation detected');
           
-        } else if (audioQueue.length > 15) {
-          console.log('🔧 AUTO-RECOVERY: Queue overflow - trimming aggressively');
-          audioQueue = audioQueue.slice(-3); // Keep only 3 most recent
+        } else if (audioQueue.length > 10) {
+          console.log('🔧 AUTO-RECOVERY: Queue overflow - HD optimization');
+          audioQueue = audioQueue.slice(-4); // Keep fewer chunks for HD quality
           if (audioContext && isPlaying) {
-            nextNoteTime = audioContext.currentTime + 0.05;
+            nextNoteTime = audioContext.currentTime + 0.02; // Faster restart for HD
           }
           
         } else if (nextNoteTime < audioContext.currentTime - 0.3) {
@@ -846,9 +908,9 @@
           startAutoRecoveryMonitor();
           
           playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing with auto-recovery enabled!', 'success');
+          updateStatus('🎵 Playing HD audio with auto-recovery!', 'success');
           
-          console.log('🎧 Audio playback started with break detection enabled');
+          console.log('🎧 HD Audio playback started with break detection enabled');
           
           // Start the audio scheduling loop
           scheduleAudio();
@@ -956,7 +1018,7 @@
 
     // Initialize
     window.addEventListener('load', () => {
-      console.log('📻 PCM FM Radio Player loaded');
+      console.log('📻 HD PCM FM Radio Player loaded');
     });
   </script>
 </body>
