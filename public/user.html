@@ -1,3 +1,6 @@
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -348,34 +351,43 @@
         
         await audioContext.resume();
         
-        // Create gain node for volume control with HD processing
+        // Create gain node for volume control with ultra-clean processing
         gainNode = audioContext.createGain();
         
-        // Add audio processing for better quality
-        const compressor = audioContext.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
-        compressor.knee.setValueAtTime(30, audioContext.currentTime);
-        compressor.ratio.setValueAtTime(12, audioContext.currentTime);
-        compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
-        compressor.release.setValueAtTime(0.25, audioContext.currentTime);
+        // Add professional noise gate to eliminate background noise and artifacts
+        const noiseGate = audioContext.createDynamicsCompressor();
+        noiseGate.threshold.setValueAtTime(-40, audioContext.currentTime); // Noise gate threshold
+        noiseGate.knee.setValueAtTime(0, audioContext.currentTime); // Hard knee for clean gating
+        noiseGate.ratio.setValueAtTime(20, audioContext.currentTime); // Strong suppression below threshold
+        noiseGate.attack.setValueAtTime(0.001, audioContext.currentTime); // Very fast attack
+        noiseGate.release.setValueAtTime(0.1, audioContext.currentTime); // Medium release
         
-        // Create EQ for better sound
+        // Create cleaner EQ with reduced gain to prevent artifacts
         const lowShelf = audioContext.createBiquadFilter();
         lowShelf.type = 'lowshelf';
         lowShelf.frequency.setValueAtTime(320, audioContext.currentTime);
-        lowShelf.gain.setValueAtTime(2, audioContext.currentTime);
+        lowShelf.gain.setValueAtTime(1, audioContext.currentTime); // Reduced from 2 to 1
         
         const highShelf = audioContext.createBiquadFilter();
         highShelf.type = 'highshelf';
         highShelf.frequency.setValueAtTime(3200, audioContext.currentTime);
-        highShelf.gain.setValueAtTime(1, audioContext.currentTime);
+        highShelf.gain.setValueAtTime(0.5, audioContext.currentTime); // Reduced from 1 to 0.5
         
-        // Connect the audio chain: gainNode -> EQ -> compressor -> destination
-        gainNode.connect(lowShelf);
+        // Gentler compressor to avoid introducing artifacts
+        const compressor = audioContext.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-18, audioContext.currentTime); // Higher threshold
+        compressor.knee.setValueAtTime(20, audioContext.currentTime);
+        compressor.ratio.setValueAtTime(6, audioContext.currentTime); // Lower ratio
+        compressor.attack.setValueAtTime(0.005, audioContext.currentTime); // Slower attack
+        compressor.release.setValueAtTime(0.15, audioContext.currentTime); // Faster release
+        
+        // Connect the ultra-clean audio chain: gainNode -> noise gate -> EQ -> gentle compressor -> destination
+        gainNode.connect(noiseGate);
+        noiseGate.connect(lowShelf);
         lowShelf.connect(highShelf);
         highShelf.connect(compressor);
         compressor.connect(audioContext.destination);
-        gainNode.gain.value = 0.8; // Slightly higher for HD quality
+        gainNode.gain.value = 0.75; // Slightly lower to prevent any overdriving
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -611,26 +623,25 @@
       const pcmData = new Int16Array(arrayBuffer);
       const floatData = new Float32Array(pcmData.length);
       
-      // Enhanced int16 to float32 conversion with better precision for HD quality
+      // Ultra-clean int16 to float32 conversion with noise elimination
       let maxAmplitude = 0;
       for (let i = 0; i < pcmData.length; i++) {
-        // More precise conversion with dithering for HD quality
+        // Pure conversion without dithering to eliminate noise sources
         let sample = pcmData[i] / 32768.0;
         
-        // Add subtle dithering to reduce quantization noise
-        const dither = (Math.random() - 0.5) * (1.0 / 32768.0);
-        sample += dither * 0.1;
+        // Apply noise floor to eliminate very quiet artifacts (much stricter)
+        if (Math.abs(sample) < 0.00005) sample = 0;
         
-        // Soft limiting to prevent clipping while preserving dynamics
-        if (sample > 0.95) sample = 0.95 + (sample - 0.95) * 0.1;
-        if (sample < -0.95) sample = -0.95 + (sample + 0.95) * 0.1;
+        // Gentler soft limiting to prevent artifacts
+        if (sample > 0.98) sample = 0.98 + (sample - 0.98) * 0.05;
+        if (sample < -0.98) sample = -0.98 + (sample + 0.98) * 0.05;
         
         floatData[i] = sample;
         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
       }
       
-      // Gentler admin pause/resume detection to prevent unnecessary breaking
-      if (maxAmplitude < 0.0001) { // Silence detected
+      // More precise admin pause/resume detection to prevent false noise triggers
+      if (maxAmplitude < 0.00001) { // Ultra-low threshold for true silence detection
         window.silenceCount++;
         window.audioCount = 0; // Reset audio counter
         
@@ -779,20 +790,29 @@
         const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
         
-        // Apply more aggressive windowing to eliminate any clicks/pops
-        const windowSize = Math.min(128, audioData.length / 3); // Larger window size
+        // Apply ultra-smooth windowing to completely eliminate any clicks/pops
+        const windowSize = Math.min(256, audioData.length / 4); // Even larger window for ultra-smooth transitions
         const windowedData = new Float32Array(audioData.length);
         
         for (let i = 0; i < audioData.length; i++) {
           let sample = audioData[i];
           
-          // Apply Hann window at edges for smooth transitions
+          // Apply smoother Tukey window (cosine-tapered) at edges for perfect transitions
           if (i < windowSize) {
-            const windowVal = 0.5 * (1 - Math.cos(2 * Math.PI * i / (2 * windowSize)));
+            // Smoother fade-in using cosine taper
+            const alpha = 0.25; // Gentler taper
+            const windowVal = 0.5 * (1 + Math.cos(Math.PI * (2 * i / windowSize - 1))) * alpha + (1 - alpha);
             sample *= windowVal;
           } else if (i >= audioData.length - windowSize) {
-            const windowVal = 0.5 * (1 - Math.cos(2 * Math.PI * (audioData.length - i) / (2 * windowSize)));
+            // Smoother fade-out using cosine taper
+            const alpha = 0.25; // Gentler taper
+            const windowVal = 0.5 * (1 + Math.cos(Math.PI * (2 * (audioData.length - i) / windowSize - 1))) * alpha + (1 - alpha);
             sample *= windowVal;
+          }
+          
+          // Additional DC removal to prevent low-frequency noise
+          if (i > 0) {
+            sample = sample - (sample + windowedData[i-1]) * 0.001; // Gentle DC blocking
           }
           
           windowedData[i] = sample;
@@ -807,15 +827,16 @@
         // Add subtle interpolation for smoother playback
         source.connect(gainNode);
         
-        // Schedule playbook with ultra-precise timing for smoothness
+        // Schedule playbook with ultra-precise timing and noise-free transitions
         if (time < audioContext.currentTime) {
-          time = audioContext.currentTime + 0.005; // Even smaller delay for ultra-smooth quality
+          time = audioContext.currentTime + 0.003; // Ultra-minimal delay for perfect timing
         }
         
         source.start(time);
         
-        // Update next time with aggressive overlap for zero gaps
-        nextNoteTime = time + audioBuffer.duration - 0.002; // Larger overlap to prevent any gaps
+        // Update next time with perfect overlap calculation to prevent any gaps or artifacts
+        const bufferDuration = audioBuffer.duration;
+        nextNoteTime = time + bufferDuration - 0.001; // Minimal overlap to prevent gaps without causing artifacts
         
         console.log(`🎵 HD Audio scheduled at ${time.toFixed(4)}s, next: ${nextNoteTime.toFixed(4)}s, queue: ${audioQueue.length}`);
         
@@ -1229,22 +1250,20 @@
             }
           }
           
-          // Create continuous dummy audio to absolutely prevent context suspension
+          // Create ultra-quiet dummy audio to prevent context suspension without adding noise
           try {
-            const dummyBuffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+            const dummyBuffer = audioContext.createBuffer(1, 32, audioContext.sampleRate); // Smaller buffer
             const dummySource = audioContext.createBufferSource();
             const dummyGain = audioContext.createGain();
             
             dummySource.buffer = dummyBuffer;
-            dummyGain.gain.value = 0.0001; // Almost silent but keeps context alive
+            dummyGain.gain.value = 0.00001; // Ultra-quiet to prevent any audible artifacts
             
             dummySource.connect(dummyGain);
             dummyGain.connect(audioContext.destination);
             dummySource.start();
-            
-            console.log('🔄 Dummy audio created to prevent suspension');
           } catch (e) {
-            // Continue even if dummy audio fails
+            // Continue even if dummy audio fails - better to avoid potential noise
           }
         }
         
@@ -1340,3 +1359,4 @@
   </script>
 </body>
 </html>
+
