@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -278,13 +279,6 @@
     window.lastChunkReceived = 0;
     window.noChunksTimeout = null;
     
-    // User page visibility detection with aggressive audio continuation
-    window.userPageVisible = true;
-    window.audioContextSuspended = false;
-    window.resumeAttempts = 0;
-    window.keepAliveInterval = null;
-    window.forceAudioContinuation = false;
-    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -357,7 +351,7 @@
         compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
         compressor.release.setValueAtTime(0.25, audioContext.currentTime);
         
-        // Create EQ for better sound and noise reduction
+        // Create EQ for better sound
         const lowShelf = audioContext.createBiquadFilter();
         lowShelf.type = 'lowshelf';
         lowShelf.frequency.setValueAtTime(320, audioContext.currentTime);
@@ -368,27 +362,12 @@
         highShelf.frequency.setValueAtTime(3200, audioContext.currentTime);
         highShelf.gain.setValueAtTime(1, audioContext.currentTime);
         
-        // Add noise reduction filter
-        const noiseFilter = audioContext.createBiquadFilter();
-        noiseFilter.type = 'highpass';
-        noiseFilter.frequency.setValueAtTime(80, audioContext.currentTime); // Remove low-frequency noise
-        noiseFilter.Q.setValueAtTime(0.5, audioContext.currentTime);
-        
-        // Add de-esser for harsh frequencies
-        const deEsser = audioContext.createBiquadFilter();
-        deEsser.type = 'notch';
-        deEsser.frequency.setValueAtTime(6000, audioContext.currentTime);
-        deEsser.Q.setValueAtTime(2, audioContext.currentTime);
-        deEsser.gain.setValueAtTime(-3, audioContext.currentTime);
-        
-        // Connect the enhanced audio chain: gainNode -> noise filter -> EQ -> de-esser -> compressor -> destination
-        gainNode.connect(noiseFilter);
-        noiseFilter.connect(lowShelf);
+        // Connect the audio chain: gainNode -> EQ -> compressor -> destination
+        gainNode.connect(lowShelf);
         lowShelf.connect(highShelf);
-        highShelf.connect(deEsser);
-        deEsser.connect(compressor);
+        highShelf.connect(compressor);
         compressor.connect(audioContext.destination);
-        gainNode.gain.value = 0.85; // Optimized for clarity
+        gainNode.gain.value = 0.8; // Slightly higher for HD quality
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -417,148 +396,9 @@
         
         console.log('🎧 PCM radio streaming started');
         
-        // Add page visibility listeners for user page switching
-        addPageVisibilityListeners();
-        
       } catch (error) {
         console.error('❌ Failed to start radio:', error);
         updateStatus('❌ Failed to start: ' + error.message, 'error');
-      }
-    }
-
-    // Enhanced page visibility listeners with aggressive audio continuation
-    function addPageVisibilityListeners() {
-      // Aggressive keep-alive mechanism for background audio
-      function startKeepAlive() {
-        if (window.keepAliveInterval) {
-          clearInterval(window.keepAliveInterval);
-        }
-        
-        window.keepAliveInterval = setInterval(async () => {
-          if (audioContext && isPlaying) {
-            try {
-              // Force audio context to stay active
-              if (audioContext.state === 'suspended') {
-                await audioContext.resume();
-                console.log('🔄 Keep-alive: Audio context resumed');
-              }
-              
-              // Maintain audio scheduling even when page is hidden
-              if (!window.userPageVisible && audioQueue.length > 0) {
-                console.log('🎵 Keep-alive: Maintaining background audio');
-              }
-              
-            } catch (error) {
-              console.log('⚠️ Keep-alive attempt failed:', error);
-            }
-          }
-        }, 1000); // Every second
-      }
-      
-      // Handle page visibility change with aggressive continuation
-      document.addEventListener('visibilitychange', async () => {
-        if (document.hidden) {
-          // User switched away from page - FORCE audio to continue
-          window.userPageVisible = false;
-          window.forceAudioContinuation = true;
-          console.log('👤 User switched away - FORCING audio continuation...');
-          
-          // Start aggressive keep-alive
-          startKeepAlive();
-          
-          // Try multiple strategies to keep audio running
-          if (audioContext && audioContext.state === 'running') {
-            console.log('🎵 Audio context running - background audio active');
-          } else if (audioContext && audioContext.state === 'suspended') {
-            try {
-              await audioContext.resume();
-              console.log('✅ Forced audio resume for background play');
-            } catch (error) {
-              console.log('⚠️ Background resume failed:', error);
-            }
-          }
-          
-        } else {
-          // User returned to page
-          window.userPageVisible = true;
-          window.forceAudioContinuation = false;
-          console.log('👤 User returned to page - normalizing audio...');
-          
-          // Stop aggressive keep-alive
-          if (window.keepAliveInterval) {
-            clearInterval(window.keepAliveInterval);
-            window.keepAliveInterval = null;
-          }
-          
-          // Ensure audio is running and clean
-          if (audioContext && audioContext.state === 'suspended') {
-            console.log('🔄 Audio suspended on return - resuming...');
-            try {
-              await audioContext.resume();
-              console.log('✅ Audio resumed successfully on return');
-              updateStatus('👤 Welcome back! Audio continuing...', 'success');
-              
-              // Clean up any accumulated audio issues
-              if (isPlaying && audioQueue.length > 8) {
-                audioQueue = audioQueue.slice(-4); // Keep only recent audio
-                nextNoteTime = audioContext.currentTime + 0.02;
-                console.log('🧹 Cleaned up audio queue on return');
-              }
-              
-            } catch (error) {
-              console.error('❌ Failed to resume on return:', error);
-              updateStatus('❌ Audio needs restart - click play', 'error');
-            }
-          } else {
-            updateStatus('🔴 LIVE - Audio streaming!', 'success');
-          }
-        }
-      });
-      
-      // Enhanced window focus/blur with wake-lock attempt
-      window.addEventListener('focus', async () => {
-        window.userPageVisible = true;
-        console.log('👤 Window focused - ensuring audio quality...');
-        
-        if (audioContext && audioContext.state === 'suspended' && isPlaying) {
-          try {
-            await audioContext.resume();
-            nextNoteTime = audioContext.currentTime + 0.01;
-            updateStatus('🔴 LIVE - Audio restored!', 'success');
-            
-            // Clean any noise that accumulated
-            if (audioQueue.length > 6) {
-              audioQueue = audioQueue.slice(-3);
-              console.log('🧹 Noise cleanup on focus');
-            }
-            
-          } catch (error) {
-            console.error('❌ Focus resume failed:', error);
-          }
-        }
-      });
-      
-      window.addEventListener('blur', () => {
-        window.userPageVisible = false;
-        console.log('👤 Window blurred - maintaining audio...');
-        
-        // Start keep-alive immediately
-        if (isPlaying) {
-          startKeepAlive();
-        }
-      });
-      
-      // Try to request wake lock for better background audio (modern browsers)
-      if ('wakeLock' in navigator && isPlaying) {
-        try {
-          navigator.wakeLock.request('screen').then(() => {
-            console.log('🔒 Wake lock acquired for better audio continuity');
-          }).catch(() => {
-            console.log('⚠️ Wake lock not available');
-          });
-        } catch (error) {
-          console.log('⚠️ Wake lock not supported');
-        }
       }
     }
 
@@ -661,34 +501,31 @@
         }
       }, 2000);
       
-      // Detect admin return to page after leaving with noise cleanup
+      // Detect admin return to page after leaving (fresh chunks after long absence)
       if (window.adminPageLeft) {
         window.adminPageLeft = false;
-        console.log('📱 Admin RETURNED to page - ENHANCED SYNC with noise cleanup');
+        console.log('📱 Admin RETURNED to page - doing PAGE RETURN RESET');
         
-        // Enhanced page return reset with noise reduction
-        audioQueue = []; // Clear ALL audio to prevent noise
+        // Page return reset - similar to restart but gentler
+        audioQueue = audioQueue.slice(-2); // Keep only 2 most recent chunks
         
-        // Wait a moment for clean audio to arrive
-        setTimeout(() => {
-          // Reset all timing and detection systems
-          window.lastAudioTime = currentTime;
-          window.lastGoodAudioTime = currentTime;
-          window.audioBreakDetected = false;
-          window.consecutiveGoodChunks = 0;
-          window.adminPaused = false;
-          window.pauseStartTime = 0;
-          window.silenceCount = 0;
-          window.audioCount = 0;
-          window.severeBreakCount = 0;
-          
-          if (audioContext && isPlaying) {
-            nextNoteTime = audioContext.currentTime + 0.01; // Very quick sync
-          }
-          
-          updateStatus('📱 Admin returned - audio cleaned and synced!', 'success');
-          console.log('📱 ENHANCED RESET: Noise-free audio sync complete');
-        }, 100); // Small delay for clean sync
+        // Reset timing and detection systems
+        window.lastAudioTime = currentTime;
+        window.lastGoodAudioTime = currentTime;
+        window.audioBreakDetected = false;
+        window.consecutiveGoodChunks = 0;
+        window.adminPaused = false;
+        window.pauseStartTime = 0;
+        window.silenceCount = 0;
+        window.audioCount = 0;
+        window.severeBreakCount = 0; // Reset severe break counter
+        
+        if (audioContext && isPlaying) {
+          nextNoteTime = audioContext.currentTime + 0.03; // Quick sync
+        }
+        
+        updateStatus('📱 Admin returned - syncing audio...', 'success');
+        console.log('📱 PAGE RETURN RESET: Audio synced for admin return');
       }
       
       // Detect admin restart after stop (fresh audio after long silence)
@@ -766,44 +603,23 @@
       const pcmData = new Int16Array(arrayBuffer);
       const floatData = new Float32Array(pcmData.length);
       
-      // Enhanced int16 to float32 conversion with superior HD quality and noise reduction
+      // Enhanced int16 to float32 conversion with better precision for HD quality
       let maxAmplitude = 0;
-      let signalLevel = 0;
-      
       for (let i = 0; i < pcmData.length; i++) {
-        // More precise conversion with advanced dithering for HD quality
+        // More precise conversion with dithering for HD quality
         let sample = pcmData[i] / 32768.0;
         
-        // Advanced noise gate - remove very low level noise
-        if (Math.abs(sample) < 0.002) {
-          sample *= 0.1; // Drastically reduce noise floor
-        }
+        // Add subtle dithering to reduce quantization noise
+        const dither = (Math.random() - 0.5) * (1.0 / 32768.0);
+        sample += dither * 0.1;
         
-        // Add triangular dithering for better quantization
-        const dither = (Math.random() + Math.random() - 1) * (0.5 / 32768.0);
-        sample += dither * 0.05;
-        
-        // Soft limiting with better curve for HD quality
-        if (sample > 0.98) {
-          sample = 0.98 + (sample - 0.98) * 0.05;
-        } else if (sample < -0.98) {
-          sample = -0.98 + (sample + 0.98) * 0.05;
-        }
-        
-        // Gentle compression for consistent levels
-        const absLevel = Math.abs(sample);
-        if (absLevel > 0.7) {
-          const ratio = 0.7 + (absLevel - 0.7) * 0.3;
-          sample = sample > 0 ? ratio : -ratio;
-        }
+        // Soft limiting to prevent clipping while preserving dynamics
+        if (sample > 0.95) sample = 0.95 + (sample - 0.95) * 0.1;
+        if (sample < -0.95) sample = -0.95 + (sample + 0.95) * 0.1;
         
         floatData[i] = sample;
         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
-        signalLevel += Math.abs(sample);
       }
-      
-      // Calculate average signal level for quality assessment
-      signalLevel = signalLevel / pcmData.length;
       
       // Much more robust admin pause/resume detection with immediate clearing
       if (maxAmplitude < 0.0001) { // Much stricter silence threshold
@@ -908,24 +724,6 @@
 
     // Enhanced scheduling with more aggressive break recovery
     function scheduleAudio() {
-      // Check if audio context is suspended
-      if (audioContext.state === 'suspended') {
-        console.log('⏸️ Audio context suspended - attempting auto-resume...');
-        audioContext.resume().then(() => {
-          console.log('✅ Audio context auto-resumed');
-          nextNoteTime = audioContext.currentTime + 0.02;
-          window.lastGoodAudioTime = Date.now();
-        }).catch(error => {
-          console.error('❌ Auto-resume failed:', error);
-        });
-        
-        // Continue scheduling loop
-        if (isPlaying) {
-          requestAnimationFrame(scheduleAudio);
-        }
-        return;
-      }
-      
       const currentTime = audioContext.currentTime;
       
       // Super aggressive break detection during scheduling
@@ -1023,29 +821,6 @@
       
       window.autoRecoveryInterval = setInterval(() => {
         if (!isStreaming || !isPlaying) return;
-        
-        // Check if audio context is suspended (user switched pages)
-        if (audioContext && audioContext.state === 'suspended' && window.userPageVisible) {
-          console.log('🔄 Audio context suspended but page visible - attempting resume...');
-          window.audioContextSuspended = true;
-          window.resumeAttempts++;
-          
-          audioContext.resume().then(() => {
-            console.log('✅ Audio context resumed in monitoring');
-            window.audioContextSuspended = false;
-            window.resumeAttempts = 0;
-            nextNoteTime = audioContext.currentTime + 0.02;
-            updateStatus('🔴 LIVE - Audio recovered from suspension!', 'success');
-          }).catch(error => {
-            console.error('❌ Failed to resume in monitoring:', error);
-            if (window.resumeAttempts >= 3) {
-              updateStatus('❌ Audio suspended - click play to resume', 'error');
-              window.resumeAttempts = 0;
-            }
-          });
-          
-          return; // Skip other checks while handling suspension
-        }
         
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
@@ -1159,15 +934,10 @@
         } else {
           // Start playing with minimal disruption
           if (audioContext.state === 'suspended') {
-            console.log('🔄 Resuming suspended audio context...');
             await audioContext.resume();
-            console.log('✅ Audio context resumed');
           }
           
           isPlaying = true;
-          window.userPageVisible = true; // Mark as visible when user interacts
-          window.audioContextSuspended = false;
-          window.resumeAttempts = 0;
           
           // Much gentler reset - don't clear everything unless necessary
           if (audioQueue.length > 10) {
@@ -1207,18 +977,6 @@
           
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing HD audio with auto-recovery!', 'success');
-          
-          // Show tip about background audio
-          setTimeout(() => {
-            if (isPlaying) {
-              updateStatus('💡 TIP: Audio continues when you switch tabs!', 'success');
-              setTimeout(() => {
-                if (isPlaying) {
-                  updateStatus('🔴 LIVE - HD Audio streaming!', 'success');
-                }
-              }, 3000);
-            }
-          }, 2000);
           
           console.log('🎧 HD Audio playback started with break detection enabled');
           
@@ -1280,9 +1038,6 @@
       window.consecutiveGoodChunks = 0;
       window.severeBreakCount = 0;
       window.lastGoodAudioTime = 0;
-      window.userPageVisible = true;
-      window.audioContextSuspended = false;
-      window.resumeAttempts = 0;
       
       // Clear any pending timeouts and intervals
       if (window.noAudioTimeout) {
