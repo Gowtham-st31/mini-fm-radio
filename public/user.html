@@ -464,59 +464,67 @@
         maxAmplitude = Math.max(maxAmplitude, Math.abs(floatData[i]));
       }
       
-      // Much more robust admin pause/resume detection
+      // Much more robust admin pause/resume detection with immediate clearing
       if (maxAmplitude < 0.0001) { // Much stricter silence threshold
         window.silenceCount++;
         window.audioCount = 0; // Reset audio counter
         
-        // Only trigger pause detection after consistent silence (10+ chunks)
-        if (window.silenceCount > 10 && !window.adminPaused) {
+        // Only trigger pause detection after consistent silence (5+ chunks for faster detection)
+        if (window.silenceCount > 5 && !window.adminPaused) {
           window.adminPaused = true;
           window.pauseStartTime = Date.now();
           console.log('🔇 Admin DEFINITELY paused - detected after ' + window.silenceCount + ' silent chunks');
           
-          // Don't immediately clear queue - wait to confirm it's a real pause
-          updateStatus('⏸️ Admin paused (confirmed) - waiting for resume...', 'streaming');
+          // IMMEDIATELY clear all audio buffers when admin pauses
+          audioQueue = [];
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.1;
+          }
+          
+          updateStatus('⏸️ Admin paused - buffers cleared!', 'streaming');
         }
       } else {
         window.audioCount++;
         window.silenceCount = 0; // Reset silence counter
         
-        // Audio detected - check for resume only after confirmed pause
-        if (window.adminPaused && window.audioCount > 3) { // Need multiple audio chunks to confirm resume
+        // Audio detected - check for resume with IMMEDIATE aggressive clearing
+        if (window.adminPaused && window.audioCount > 1) { // Faster resume detection (only 1 audio chunk needed)
           window.adminPaused = false;
           const pauseDuration = Date.now() - window.pauseStartTime;
           
-          console.log('🔄 Admin DEFINITELY resumed after ' + pauseDuration + 'ms - detected after ' + window.audioCount + ' audio chunks');
+          console.log('🔄 Admin DEFINITELY resumed after ' + pauseDuration + 'ms - AGGRESSIVE CLEAR');
           
-          // Only do major reset if it was a real pause (longer than 2 seconds)
-          if (pauseDuration > 2000) {
-            audioQueue = []; // Clear old audio only for long pauses
-            nextNoteTime = audioContext.currentTime + 0.1; // Shorter delay for quick recovery
-            console.log('📢 Major reset - long pause detected');
-          } else {
-            console.log('📢 Minor adjustment - short pause, keeping most audio');
-            // Keep most audio for short interruptions
-            audioQueue = audioQueue.slice(-5);
+          // ALWAYS do aggressive clear on admin resume regardless of duration
+          audioQueue = []; // Clear ALL old audio
+          
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.05; // Very quick restart
           }
           
-          // Reset counters
+          // Reset ALL counters and detection systems
           window.pauseStartTime = 0;
           window.silenceCount = 0;
           window.audioCount = 0;
+          window.audioBreakDetected = false;
+          window.consecutiveGoodChunks = 0;
+          window.lastAudioTime = Date.now();
           
-          updateStatus('🔴 LIVE - Clean audio stream!', 'success');
+          updateStatus('🔴 LIVE - Admin resumed with fresh buffers!', 'success');
+          console.log('💥 AGGRESSIVE CLEAR: All buffers cleared for admin resume');
         }
       }
       
-      // Add to audio queue (but limit size during recovery)
-      if (window.audioBreakDetected) {
+      // Add to audio queue (with aggressive filtering during admin pause/resume)
+      if (window.adminPaused) {
+        // During admin pause, don't add any audio to prevent stale data
+        console.log('⏸️ Admin paused - rejecting audio chunk');
+      } else if (window.audioBreakDetected) {
         // During recovery, keep queue very small
-        if (audioQueue.length < 3) {
+        if (audioQueue.length < 2) {
           audioQueue.push(floatData);
         }
       } else {
-        // Normal operation
+        // Normal operation - but always check if we need immediate clear
         audioQueue.push(floatData);
       }
       
@@ -557,33 +565,38 @@
       }
     }
 
-    // Enhanced scheduling with automatic break recovery
+    // Enhanced scheduling with more aggressive break recovery
     function scheduleAudio() {
       const currentTime = audioContext.currentTime;
       
-      // Enhanced break detection during scheduling
-      if (nextNoteTime < currentTime - 0.3) {
-        console.log('🚨 SEVERE audio timing break detected - immediate recovery!');
+      // Super aggressive break detection during scheduling
+      if (nextNoteTime < currentTime - 0.2) {
+        console.log('🚨 SEVERE audio timing break detected - IMMEDIATE AGGRESSIVE CLEAR!');
         
-        // Immediate recovery action
-        audioQueue = []; // Clear all stale audio
-        nextNoteTime = currentTime + 0.02; // Very quick restart
+        // Nuclear option - clear everything immediately
+        audioQueue = []; // Clear ALL stale audio
+        nextNoteTime = currentTime + 0.01; // Instant restart
         
+        // Force all detection systems to reset
         window.audioBreakDetected = true;
         window.consecutiveGoodChunks = 0;
+        window.adminPaused = false; // Force admin pause state reset
+        window.silenceCount = 0;
+        window.audioCount = 0;
         
-        updateStatus('🔧 Breaking detected - auto-clearing...', 'streaming');
+        updateStatus('🔧 SEVERE break - nuclear clear activated!', 'streaming');
         
-        // Reset after 1 second
+        // Quick recovery confirmation
         setTimeout(() => {
           if (isPlaying) {
-            updateStatus('✅ Auto-recovery complete!', 'success');
+            updateStatus('✅ Nuclear recovery complete!', 'success');
+            console.log('💥 Nuclear recovery complete - fresh start');
           }
-        }, 1000);
+        }, 500);
         
-      } else if (nextNoteTime < currentTime - 0.1) {
-        console.log('🔄 Minor audio timing lag - gentle catch up');
-        nextNoteTime = currentTime + 0.03; // Quick catch up
+      } else if (nextNoteTime < currentTime - 0.05) {
+        console.log('🔄 Minor audio timing lag - quick catch up');
+        nextNoteTime = currentTime + 0.01; // Very quick catch up
       }
       
       // Schedule audio chunks while we're ahead of time and have data
