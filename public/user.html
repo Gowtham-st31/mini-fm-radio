@@ -632,53 +632,55 @@
         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
       }
       
-      // Much more robust admin pause/resume detection with immediate clearing
-      if (maxAmplitude < 0.0001) { // Much stricter silence threshold
+      // Gentler admin pause/resume detection to prevent unnecessary breaking
+      if (maxAmplitude < 0.0001) { // Silence detected
         window.silenceCount++;
         window.audioCount = 0; // Reset audio counter
         
-        // Only trigger pause detection after consistent silence (5+ chunks for faster detection)
-        if (window.silenceCount > 5 && !window.adminPaused) {
+        // Only trigger pause detection after longer consistent silence (10+ chunks for stability)
+        if (window.silenceCount > 10 && !window.adminPaused) {
           window.adminPaused = true;
           window.pauseStartTime = Date.now();
-          console.log('🔇 Admin DEFINITELY paused - detected after ' + window.silenceCount + ' silent chunks');
+          console.log('🔇 Admin paused - detected after ' + window.silenceCount + ' silent chunks');
           
-          // IMMEDIATELY clear all audio buffers when admin pauses
-          audioQueue = [];
+          // Gentler clear - don't clear ALL audio immediately
+          if (audioQueue.length > 8) {
+            audioQueue = audioQueue.slice(-4); // Keep some recent audio
+          }
           if (audioContext && isPlaying) {
             nextNoteTime = audioContext.currentTime + 0.1;
           }
           
-          updateStatus('⏸️ Admin paused - buffers cleared!', 'streaming');
+          updateStatus('⏸️ Admin paused - standby mode', 'streaming');
         }
       } else {
         window.audioCount++;
         window.silenceCount = 0; // Reset silence counter
         
-        // Audio detected - check for resume with IMMEDIATE aggressive clearing
-        if (window.adminPaused && window.audioCount > 1) { // Faster resume detection (only 1 audio chunk needed)
+        // Audio detected - check for resume (need more audio chunks for stability)
+        if (window.adminPaused && window.audioCount > 3) { // Need 3+ audio chunks to confirm resume
           window.adminPaused = false;
           const pauseDuration = Date.now() - window.pauseStartTime;
           
-          console.log('🔄 Admin DEFINITELY resumed after ' + pauseDuration + 'ms - AGGRESSIVE CLEAR');
+          console.log('🔄 Admin resumed after ' + pauseDuration + 'ms - gentle sync');
           
-          // ALWAYS do aggressive clear on admin resume regardless of duration
-          audioQueue = []; // Clear ALL old audio
-          
-          if (audioContext && isPlaying) {
-            nextNoteTime = audioContext.currentTime + 0.05; // Very quick restart
+          // Gentler resume - only clear if pause was very long
+          if (pauseDuration > 3000) {
+            audioQueue = audioQueue.slice(-6); // Keep more recent audio
           }
           
-          // Reset ALL counters and detection systems
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.05; // Quick but gentle restart
+          }
+          
+          // Reset counters
           window.pauseStartTime = 0;
           window.silenceCount = 0;
           window.audioCount = 0;
-          window.audioBreakDetected = false;
-          window.consecutiveGoodChunks = 0;
           window.lastAudioTime = Date.now();
           
-          updateStatus('🔴 LIVE - Admin resumed with fresh buffers!', 'success');
-          console.log('💥 AGGRESSIVE CLEAR: All buffers cleared for admin resume');
+          updateStatus('🔴 LIVE - Admin resumed!', 'success');
+          console.log('✅ Gentle resume complete');
         }
       }
       
@@ -706,10 +708,10 @@
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Keep queue optimized for HD quality (smaller, more responsive)
-      if (audioQueue.length > 12) {
-        console.log('🗑️ HD Queue optimization - keeping only recent high-quality audio');
-        audioQueue = audioQueue.slice(-8); // Smaller queue for better quality
+      // Keep queue optimized for smooth playback (less aggressive clearing)
+      if (audioQueue.length > 15) {
+        console.log('🗑️ Queue optimization - keeping more audio for smooth playback');
+        audioQueue = audioQueue.slice(-10); // Keep more chunks for smoother audio
       }
     }
 
@@ -733,25 +735,26 @@
       }
     }
 
-    // Enhanced scheduling with more aggressive break recovery
+    // Enhanced scheduling with better continuity and less breaking
     function scheduleAudio() {
+      if (!audioContext || !isPlaying) return;
+      
       const currentTime = audioContext.currentTime;
       
-      // Super aggressive break detection during scheduling
-      if (nextNoteTime < currentTime - 0.2) {
-        console.log('🚨 SEVERE audio timing break detected - IMMEDIATE RECOVERY!');
-        
-        // Immediate recovery instead of waiting for monitoring
-        forceAudioReset('Severe timing break during scheduling');
-        
-      } else if (nextNoteTime < currentTime - 0.05) {
-        console.log('🔄 Minor audio timing lag - quick catch up');
-        nextNoteTime = currentTime + 0.01; // Very quick catch up
+      // More gentle break detection - less aggressive resetting
+      if (nextNoteTime < currentTime - 0.5) {
+        console.log('� Audio timing reset - gap was too large');
+        nextNoteTime = currentTime + 0.02; // Smaller gap
+      } else if (nextNoteTime < currentTime) {
+        // Minor lag - just adjust slightly
+        nextNoteTime = currentTime + 0.01;
       }
       
-      // Schedule audio chunks with HD quality processing
+      // Schedule multiple chunks ahead for smoother playback
       let scheduled = 0;
-      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < 3) {
+      const maxSchedule = audioQueue.length > 5 ? 4 : 2; // More when queue is full
+      
+      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < maxSchedule) {
         playAudioAtTime(nextNoteTime);
         scheduled++;
       }
@@ -761,7 +764,7 @@
         window.lastGoodAudioTime = Date.now();
       }
       
-      // Continue scheduling if playing
+      // Continue scheduling with better timing
       if (isPlaying) {
         requestAnimationFrame(scheduleAudio);
       }
@@ -823,7 +826,7 @@
       }
     }
 
-    // Continuous auto-recovery monitoring system
+    // Continuous auto-recovery monitoring system (less aggressive to prevent breaking)
     function startAutoRecoveryMonitor() {
       // Clear any existing monitor
       if (window.autoRecoveryInterval) {
@@ -831,20 +834,20 @@
       }
       
       window.autoRecoveryInterval = setInterval(() => {
-        if (!isStreaming || !isPlaying) return;
+        if (!isStreaming || !isPlaying || window.backgroundAudioActive) return;
         
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
         const timeSinceLastChunk = currentTime - window.lastChunkTime;
         const timeSinceChunkReceived = currentTime - window.lastChunkReceived;
         
-        // Detect various types of breaks and fix them proactively
-        if (timeSinceLastAudio > 500 && audioQueue.length < 2 && !window.adminPageLeft) {
-          console.log('🔧 AUTO-RECOVERY: Audio starving detected - forcing reset');
+        // Less aggressive detection to prevent unnecessary breaking
+        if (timeSinceLastAudio > 1000 && audioQueue.length < 2 && !window.adminPageLeft) {
+          console.log('🔧 AUTO-RECOVERY: Audio starving detected - gentle reset');
           forceAudioReset('Audio starvation detected');
           
-        } else if (timeSinceLastChunk > 1000 && !window.adminPageLeft) {
-          console.log('🔧 AUTO-RECOVERY: No chunks for 1+ sec - forcing reset');
+        } else if (timeSinceLastChunk > 2000 && !window.adminPageLeft) {
+          console.log('🔧 AUTO-RECOVERY: No chunks for 2+ sec - gentle reset');
           forceAudioReset('Chunk starvation detected');
           
         } else if (timeSinceChunkReceived > 5000 && !window.adminPageLeft) {
@@ -853,27 +856,27 @@
           window.adminPageLeft = true;
           updateStatus('📱 Admin left page - waiting for return...', 'streaming');
           
-        } else if (audioQueue.length > 10) {
-          console.log('🔧 AUTO-RECOVERY: Queue overflow - HD optimization');
-          audioQueue = audioQueue.slice(-4); // Keep fewer chunks for HD quality
+        } else if (audioQueue.length > 20) {
+          console.log('🔧 AUTO-RECOVERY: Queue overflow - gentle optimization');
+          audioQueue = audioQueue.slice(-12); // Keep more chunks for smoother audio
           if (audioContext && isPlaying) {
-            nextNoteTime = audioContext.currentTime + 0.02; // Faster restart for HD
+            nextNoteTime = audioContext.currentTime + 0.05; // Gentler restart
           }
           
-        } else if (nextNoteTime < audioContext.currentTime - 0.3 && !window.adminPageLeft) {
-          console.log('🔧 AUTO-RECOVERY: Severe timing drift - forcing reset');
-          forceAudioReset('Severe timing drift');
+        } else if (nextNoteTime < audioContext.currentTime - 1.0 && !window.adminPageLeft) {
+          console.log('🔧 AUTO-RECOVERY: Major timing drift - gentle reset');
+          forceAudioReset('Major timing drift');
           window.severeBreakCount++;
           
-          // If we get too many severe breaks, simulate admin restart
-          if (window.severeBreakCount >= 3) {
+          // Only simulate restart after many severe breaks
+          if (window.severeBreakCount >= 5) {
             console.log('🚨 MULTIPLE SEVERE BREAKS - Simulating admin restart');
             simulateAdminRestart();
             window.severeBreakCount = 0;
           }
         }
         
-      }, 250); // Check every 250ms for proactive recovery
+      }, 500); // Check every 500ms for gentler recovery
     }
     
     // Force immediate audio reset (like admin restart but without waiting)
@@ -1116,7 +1119,7 @@
       if (window.backgroundKeepAlive) clearInterval(window.backgroundKeepAlive);
     });
     
-    // Handle page visibility changes for background audio
+    // Handle page visibility changes for background audio with enhanced reliability
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
         // User switched to another tab/window
@@ -1139,6 +1142,22 @@
       }
     });
     
+    // Also handle focus/blur events for better compatibility
+    window.addEventListener('blur', function() {
+      if (isPlaying && isStreaming && !window.backgroundAudioActive) {
+        console.log('🔄 Window lost focus - enabling background audio');
+        startBackgroundAudioMode();
+      }
+    });
+    
+    window.addEventListener('focus', function() {
+      if (window.backgroundAudioActive) {
+        console.log('🔄 Window gained focus - optimizing for foreground');
+        stopBackgroundAudioMode();
+        resumeForegroundAudio();
+      }
+    });
+    
     // Start background audio mode with aggressive continuation
     async function startBackgroundAudioMode() {
       console.log('🔄 Starting AGGRESSIVE background audio mode...');
@@ -1154,28 +1173,48 @@
         console.log('⚠️ Wake lock not available:', error.message);
       }
       
-      // Aggressive keep-alive interval to maintain audio context
+      // VERY aggressive keep-alive interval to maintain audio context
       window.backgroundKeepAlive = setInterval(() => {
-        if (isPlaying && audioContext && audioContext.state === 'suspended') {
-          console.log('🔄 Resuming suspended audio context in background');
-          audioContext.resume().catch(e => console.log('Resume failed:', e));
-        }
-        
-        // Force audio scheduling to continue
-        if (isPlaying && audioQueue.length > 0) {
-          const currentTime = audioContext.currentTime;
-          if (nextNoteTime < currentTime - 0.1) {
-            console.log('🔄 Background audio timing correction');
-            nextNoteTime = currentTime + 0.05;
+        if (isPlaying && audioContext) {
+          if (audioContext.state === 'suspended') {
+            console.log('🔄 Resuming suspended audio context in background');
+            audioContext.resume().catch(e => console.log('Resume failed:', e));
+          }
+          
+          // Force audio scheduling to continue even in background
+          if (audioQueue.length > 0) {
+            const currentTime = audioContext.currentTime;
+            if (nextNoteTime < currentTime - 0.1) {
+              console.log('🔄 Background audio timing correction');
+              nextNoteTime = currentTime + 0.02;
+            }
+            
+            // Force schedule audio even in background
+            let scheduled = 0;
+            while (nextNoteTime < currentTime + 0.1 && audioQueue.length > 0 && scheduled < 2) {
+              playAudioAtTime(nextNoteTime);
+              scheduled++;
+            }
+          }
+          
+          // Create dummy audio to keep context alive
+          try {
+            const dummyBuffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+            const dummySource = audioContext.createBufferSource();
+            dummySource.buffer = dummyBuffer;
+            dummySource.connect(audioContext.destination);
+            dummySource.start();
+          } catch (e) {
+            // Ignore errors for dummy audio
           }
         }
         
         // Log background audio status
-        console.log(`🎵 Background audio: queue=${audioQueue.length}, playing=${isPlaying}, context=${audioContext?.state}`);
+        console.log(`🎵 Background: queue=${audioQueue.length}, playing=${isPlaying}, context=${audioContext?.state}`);
         
-      }, 500); // Check every 500ms for aggressive background support
+      }, 200); // Check every 200ms for VERY aggressive background support
       
-      updateStatus('🎧 Background audio active - radio playing in background', 'success');
+      updateStatus('🎧 Background audio active - radio continues in background!', 'success');
       backgroundStatus.style.display = 'block';
     }
     
@@ -1229,9 +1268,33 @@
       updateStatus('🔴 LIVE - Resumed foreground audio!', 'success');
     }
 
-    // Initialize
+    // Initialize and add user interaction handlers
     window.addEventListener('load', () => {
       console.log('📻 HD PCM FM Radio Player loaded');
+      
+      // Add user interaction handlers to ensure audio can play
+      const enableAudioContext = async () => {
+        if (audioContext && audioContext.state === 'suspended') {
+          try {
+            await audioContext.resume();
+            console.log('✅ Audio context resumed after user interaction');
+          } catch (error) {
+            console.log('⚠️ Failed to resume audio context:', error);
+          }
+        }
+      };
+      
+      // Listen for user interactions to enable audio
+      document.addEventListener('click', enableAudioContext, { once: true });
+      document.addEventListener('touchstart', enableAudioContext, { once: true });
+      document.addEventListener('keydown', enableAudioContext, { once: true });
+      
+      // Prevent audio context suspension on mobile
+      document.addEventListener('touchend', () => {
+        if (isPlaying && audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(e => console.log('Resume after touch failed:', e));
+        }
+      });
     });
   </script>
 </body>
