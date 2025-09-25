@@ -23,7 +23,20 @@ wss.on("connection", (ws, req) => {
   console.log(`🎵 New client connected (${clients.length} total)`);
   console.log(`📍 Client from: ${req.socket.remoteAddress}:${req.socket.remotePort}`);
 
-  ws.on("message", (audioData) => {
+  ws.on("message", (data) => {
+    // Handle heartbeat ping messages
+    if (data.toString() === 'ping') {
+      try {
+        ws.send('pong');
+        console.log('💗 Heartbeat ping/pong exchanged');
+      } catch (error) {
+        console.error('❌ Heartbeat response error:', error.message);
+      }
+      return;
+    }
+    
+    // Handle audio data (binary)
+    const audioData = data;
     broadcastCount++;
     
     // Broadcast audio to all other clients
