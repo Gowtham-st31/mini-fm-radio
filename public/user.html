@@ -264,6 +264,11 @@
     window.lastChunkTime = 0;
     window.noAudioTimeout = null;
     
+    // Enhanced auto-recovery system
+    window.autoRecoveryInterval = null;
+    window.severeBreakCount = 0;
+    window.lastGoodAudioTime = 0;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -340,6 +345,9 @@
         totalBytes = 0;
         audioQueue = [];
         nextNoteTime = 0;
+        
+        // Start continuous auto-recovery monitoring
+        startAutoRecoveryMonitor();
         
         // Update UI
         connectBtn.style.display = 'none';
@@ -504,6 +512,7 @@
       }
       
       window.lastAudioTime = currentTime;
+      window.lastGoodAudioTime = currentTime; // Track last truly good audio
       
       console.log(`📡 PCM chunk ${chunkCount}: ${arrayBuffer.byteLength} bytes, queue: ${audioQueue.length}, delay: ${window.lastAudioTime ? currentTime - window.lastAudioTime : 0}ms`);
       
@@ -625,28 +634,10 @@
       
       // Super aggressive break detection during scheduling
       if (nextNoteTime < currentTime - 0.2) {
-        console.log('🚨 SEVERE audio timing break detected - IMMEDIATE AGGRESSIVE CLEAR!');
+        console.log('🚨 SEVERE audio timing break detected - IMMEDIATE RECOVERY!');
         
-        // Nuclear option - clear everything immediately
-        audioQueue = []; // Clear ALL stale audio
-        nextNoteTime = currentTime + 0.01; // Instant restart
-        
-        // Force all detection systems to reset
-        window.audioBreakDetected = true;
-        window.consecutiveGoodChunks = 0;
-        window.adminPaused = false; // Force admin pause state reset
-        window.silenceCount = 0;
-        window.audioCount = 0;
-        
-        updateStatus('🔧 SEVERE break - nuclear clear activated!', 'streaming');
-        
-        // Quick recovery confirmation
-        setTimeout(() => {
-          if (isPlaying) {
-            updateStatus('✅ Nuclear recovery complete!', 'success');
-            console.log('💥 Nuclear recovery complete - fresh start');
-          }
-        }, 500);
+        // Immediate recovery instead of waiting for monitoring
+        forceAudioReset('Severe timing break during scheduling');
         
       } else if (nextNoteTime < currentTime - 0.05) {
         console.log('🔄 Minor audio timing lag - quick catch up');
@@ -654,8 +645,15 @@
       }
       
       // Schedule audio chunks while we're ahead of time and have data
-      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0) {
+      let scheduled = 0;
+      while (nextNoteTime < currentTime + scheduleAheadTime && audioQueue.length > 0 && scheduled < 5) {
         playAudioAtTime(nextNoteTime);
+        scheduled++;
+      }
+      
+      // Update good audio time when we successfully schedule
+      if (scheduled > 0) {
+        window.lastGoodAudioTime = Date.now();
       }
       
       // Continue scheduling if playing
@@ -698,6 +696,104 @@
       }
     }
 
+    // Continuous auto-recovery monitoring system
+    function startAutoRecoveryMonitor() {
+      // Clear any existing monitor
+      if (window.autoRecoveryInterval) {
+        clearInterval(window.autoRecoveryInterval);
+      }
+      
+      window.autoRecoveryInterval = setInterval(() => {
+        if (!isStreaming || !isPlaying) return;
+        
+        const currentTime = Date.now();
+        const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
+        const timeSinceLastChunk = currentTime - window.lastChunkTime;
+        
+        // Detect various types of breaks and fix them proactively
+        if (timeSinceLastAudio > 500 && audioQueue.length < 2) {
+          console.log('🔧 AUTO-RECOVERY: Audio starving detected - forcing reset');
+          forceAudioReset('Audio starvation detected');
+          
+        } else if (timeSinceLastChunk > 1000) {
+          console.log('🔧 AUTO-RECOVERY: No chunks for 1+ sec - forcing reset');
+          forceAudioReset('Chunk starvation detected');
+          
+        } else if (audioQueue.length > 15) {
+          console.log('🔧 AUTO-RECOVERY: Queue overflow - trimming aggressively');
+          audioQueue = audioQueue.slice(-3); // Keep only 3 most recent
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.05;
+          }
+          
+        } else if (nextNoteTime < audioContext.currentTime - 0.3) {
+          console.log('🔧 AUTO-RECOVERY: Severe timing drift - forcing reset');
+          forceAudioReset('Severe timing drift');
+          window.severeBreakCount++;
+          
+          // If we get too many severe breaks, simulate admin restart
+          if (window.severeBreakCount >= 3) {
+            console.log('🚨 MULTIPLE SEVERE BREAKS - Simulating admin restart');
+            simulateAdminRestart();
+            window.severeBreakCount = 0;
+          }
+        }
+        
+      }, 250); // Check every 250ms for proactive recovery
+    }
+    
+    // Force immediate audio reset (like admin restart but without waiting)
+    function forceAudioReset(reason) {
+      console.log(`💥 FORCE RESET: ${reason}`);
+      
+      // Complete audio system reset
+      audioQueue = [];
+      window.audioBreakDetected = false;
+      window.consecutiveGoodChunks = 0;
+      window.adminPaused = false;
+      window.silenceCount = 0;
+      window.audioCount = 0;
+      
+      if (audioContext && isPlaying) {
+        nextNoteTime = audioContext.currentTime + 0.02; // Very quick restart
+      }
+      
+      updateStatus('🔧 Auto-recovery: ' + reason, 'streaming');
+      
+      // Reset tracking
+      window.lastGoodAudioTime = Date.now();
+      window.lastAudioTime = Date.now();
+    }
+    
+    // Simulate admin restart for severe cases
+    function simulateAdminRestart() {
+      console.log('🔄 SIMULATING ADMIN RESTART for recovery');
+      
+      // Reset all counters as if admin restarted
+      chunkCount = 0;
+      totalBytes = 0;
+      audioQueue = [];
+      
+      // Reset all detection systems
+      window.adminPaused = false;
+      window.adminStopped = false;
+      window.pauseStartTime = 0;
+      window.silenceCount = 0;
+      window.audioCount = 0;
+      window.lastAudioTime = Date.now();
+      window.lastGoodAudioTime = Date.now();
+      window.lastChunkTime = Date.now();
+      window.audioBreakDetected = false;
+      window.consecutiveGoodChunks = 0;
+      
+      if (audioContext && isPlaying) {
+        nextNoteTime = audioContext.currentTime + 0.05;
+      }
+      
+      updateStatus('🔄 Simulated restart - fresh sync!', 'success');
+      console.log('💥 SIMULATED RESTART COMPLETE');
+    }
+
     // Toggle audio playback
     async function toggleAudio() {
       if (!isStreaming) {
@@ -735,14 +831,19 @@
           window.audioCount = 0;
           window.lastAudioTime = Date.now();
           window.lastChunkTime = Date.now();
+          window.lastGoodAudioTime = Date.now();
           window.audioBreakDetected = false;
           window.consecutiveGoodChunks = 0;
+          window.severeBreakCount = 0;
           
           // Clear any pending timeouts
           if (window.noAudioTimeout) {
             clearTimeout(window.noAudioTimeout);
             window.noAudioTimeout = null;
           }
+          
+          // Start monitoring system
+          startAutoRecoveryMonitor();
           
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing with auto-recovery enabled!', 'success');
@@ -803,11 +904,18 @@
       window.lastChunkTime = 0;
       window.audioBreakDetected = false;
       window.consecutiveGoodChunks = 0;
+      window.severeBreakCount = 0;
+      window.lastGoodAudioTime = 0;
       
-      // Clear any pending timeouts
+      // Clear any pending timeouts and intervals
       if (window.noAudioTimeout) {
         clearTimeout(window.noAudioTimeout);
         window.noAudioTimeout = null;
+      }
+      
+      if (window.autoRecoveryInterval) {
+        clearInterval(window.autoRecoveryInterval);
+        window.autoRecoveryInterval = null;
       }
       
       // Update UI
