@@ -259,6 +259,11 @@
     window.audioBreakDetected = false;
     window.consecutiveGoodChunks = 0;
     
+    // Admin stop/start detection (different from pause/resume)
+    window.adminStopped = false;
+    window.lastChunkTime = 0;
+    window.noAudioTimeout = null;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -409,6 +414,55 @@
       bufferStat.textContent = Math.min(audioQueue.length * 5, 100) + '%';
       
       const currentTime = Date.now();
+      
+      // Clear any pending "no audio" timeout since we just received audio
+      if (window.noAudioTimeout) {
+        clearTimeout(window.noAudioTimeout);
+        window.noAudioTimeout = null;
+      }
+      
+      // Admin stop/start detection - if no audio for 2+ seconds, consider admin stopped
+      window.lastChunkTime = currentTime;
+      window.noAudioTimeout = setTimeout(() => {
+        if (!window.adminStopped && isStreaming) {
+          window.adminStopped = true;
+          console.log('🛑 Admin appears to have STOPPED streaming (2+ sec silence)');
+          updateStatus('🛑 Admin stopped - waiting for restart...', 'error');
+          
+          // Clear stale audio when admin stops
+          audioQueue = [];
+          if (audioContext && isPlaying) {
+            nextNoteTime = audioContext.currentTime + 0.1;
+          }
+        }
+      }, 2000);
+      
+      // Detect admin restart after stop (fresh audio after long silence)
+      if (window.adminStopped) {
+        window.adminStopped = false;
+        console.log('🔄 Admin RESTARTED streaming - doing COMPLETE RESET');
+        
+        // COMPLETE RESET for admin restart (much more aggressive than pause/resume)
+        audioQueue = []; // Clear ALL old audio
+        chunkCount = 1; // Reset chunk counter for fresh start
+        totalBytes = arrayBuffer.byteLength; // Reset data counter
+        
+        // Reset ALL timing and detection systems
+        window.lastAudioTime = currentTime;
+        window.audioBreakDetected = false;
+        window.consecutiveGoodChunks = 0;
+        window.adminPaused = false;
+        window.pauseStartTime = 0;
+        window.silenceCount = 0;
+        window.audioCount = 0;
+        
+        if (audioContext && isPlaying) {
+          nextNoteTime = audioContext.currentTime + 0.05; // Fresh timing start
+        }
+        
+        updateStatus('🔴 LIVE - Admin restarted with fresh sync!', 'success');
+        console.log('💥 COMPLETE RESET: All systems cleared for admin restart');
+      }
       
       // Detect audio breaks - if chunks are coming too slowly or irregularly
       if (window.lastAudioTime > 0) {
@@ -675,12 +729,20 @@
           
           // Reset all detection systems including auto-recovery
           window.adminPaused = false;
+          window.adminStopped = false;
           window.pauseStartTime = 0;
           window.silenceCount = 0;
           window.audioCount = 0;
           window.lastAudioTime = Date.now();
+          window.lastChunkTime = Date.now();
           window.audioBreakDetected = false;
           window.consecutiveGoodChunks = 0;
+          
+          // Clear any pending timeouts
+          if (window.noAudioTimeout) {
+            clearTimeout(window.noAudioTimeout);
+            window.noAudioTimeout = null;
+          }
           
           playBtn.textContent = '⏸️';
           updateStatus('🎵 Playing with auto-recovery enabled!', 'success');
@@ -730,6 +792,23 @@
       gainNode = null;
       chunkCount = 0;
       totalBytes = 0;
+      
+      // Reset all detection systems
+      window.adminPaused = false;
+      window.adminStopped = false;
+      window.pauseStartTime = 0;
+      window.silenceCount = 0;
+      window.audioCount = 0;
+      window.lastAudioTime = 0;
+      window.lastChunkTime = 0;
+      window.audioBreakDetected = false;
+      window.consecutiveGoodChunks = 0;
+      
+      // Clear any pending timeouts
+      if (window.noAudioTimeout) {
+        clearTimeout(window.noAudioTimeout);
+        window.noAudioTimeout = null;
+      }
       
       // Update UI
       connectBtn.style.display = 'inline-block';
