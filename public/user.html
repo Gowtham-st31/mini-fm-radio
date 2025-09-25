@@ -246,16 +246,16 @@
     let chunkCount = 0;
     let totalBytes = 0;
     
-    // Simple continuous audio approach with HD quality settings
+    // Simple continuous audio approach with optimized settings for smooth playback
     let audioQueue = [];
     let currentSource = null;
     let sampleRate = 48000; // High-quality sample rate
-    let scheduleAheadTime = 0.05; // Reduced for lower latency, better quality
+    let scheduleAheadTime = 0.1; // Increased for smoother playback
     let nextNoteTime = 0.0;
     
-    // HD Audio quality settings
-    let audioBufferSize = 4096; // Larger buffer for better quality
-    let qualityMode = 'hd'; // HD mode flag
+    // Optimized Audio quality settings for smooth playback
+    let audioBufferSize = 4096; // Larger buffer for smoother quality
+    let qualityMode = 'smooth'; // Smooth mode flag
     
     // Admin pause/resume detection with stricter thresholds
     window.adminPaused = false;
@@ -708,10 +708,10 @@
         updateStatus('🎵 Ready! Click ▶️ to hear audio', 'success');
       }
       
-      // Keep queue optimized for smooth playback (less aggressive clearing)
-      if (audioQueue.length > 15) {
-        console.log('🗑️ Queue optimization - keeping more audio for smooth playback');
-        audioQueue = audioQueue.slice(-10); // Keep more chunks for smoother audio
+      // Keep queue optimized for ultra-smooth playback
+      if (audioQueue.length > 20) {
+        console.log('🗑️ Queue optimization - maintaining smooth buffer');
+        audioQueue = audioQueue.slice(-15); // Keep even more chunks for ultra-smooth audio
       }
     }
 
@@ -764,9 +764,10 @@
         window.lastGoodAudioTime = Date.now();
       }
       
-      // Continue scheduling with better timing
+      // Continue scheduling with consistent timing
       if (isPlaying) {
-        requestAnimationFrame(scheduleAudio);
+        // Use setTimeout for more consistent scheduling
+        setTimeout(scheduleAudio, 20); // 20ms intervals for ultra-smooth scheduling
       }
     }
 
@@ -809,15 +810,15 @@
         // Add subtle interpolation for smoother playback
         source.connect(gainNode);
         
-        // Schedule playback with precision timing
+        // Schedule playbook with ultra-precise timing for smoothness
         if (time < audioContext.currentTime) {
-          time = audioContext.currentTime + 0.001; // Minimal delay for HD quality
+          time = audioContext.currentTime + 0.005; // Even smaller delay for ultra-smooth quality
         }
         
         source.start(time);
         
-        // Update next time with precise calculation
-        nextNoteTime = time + audioBuffer.duration;
+        // Update next time with ultra-precise calculation for no gaps
+        nextNoteTime = time + audioBuffer.duration - 0.001; // Tiny overlap to prevent gaps
         
         console.log(`🎵 HD Audio scheduled at ${time.toFixed(4)}s, next: ${nextNoteTime.toFixed(4)}s, queue: ${audioQueue.length}`);
         
@@ -834,7 +835,7 @@
       }
       
       window.autoRecoveryInterval = setInterval(() => {
-        if (!isStreaming || !isPlaying || window.backgroundAudioActive) return;
+        if (!isStreaming || !isPlaying || window.backgroundAudioActive) return; // Don't interfere with background mode
         
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
@@ -959,12 +960,12 @@
           
           isPlaying = true;
           
-          // Much gentler reset - don't clear everything unless necessary
-          if (audioQueue.length > 10) {
-            audioQueue = audioQueue.slice(-5); // Keep only recent audio
+          // Much gentler reset - maintain larger buffer for smoothness
+          if (audioQueue.length > 15) {
+            audioQueue = audioQueue.slice(-10); // Keep more recent audio for smoothness
           }
           
-          nextNoteTime = audioContext.currentTime + 0.1; // Quick start
+          nextNoteTime = audioContext.currentTime + 0.1; // Slightly longer startup buffer
           
           // Reset all detection systems including auto-recovery
           window.adminPaused = false;
@@ -1119,21 +1120,27 @@
       if (window.backgroundKeepAlive) clearInterval(window.backgroundKeepAlive);
     });
     
-    // Handle page visibility changes for background audio with enhanced reliability
+    // Handle page visibility changes with ultra-aggressive background audio
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
-        // User switched to another tab/window
+        // User switched to another tab/window - IMMEDIATELY go into protection mode
         window.userPageHidden = true;
-        console.log('📱 User switched AWAY from radio page - enabling background audio');
+        console.log('📱 User switched AWAY - IMMEDIATE background protection');
         
         if (isPlaying && isStreaming) {
+          // Don't wait - immediately start aggressive mode
           startBackgroundAudioMode();
+          
+          // Also force audio context to stay active
+          if (audioContext && audioContext.state !== 'running') {
+            audioContext.resume().catch(e => console.log('Immediate resume failed:', e));
+          }
         }
         
       } else {
         // User returned to the radio tab
         window.userPageHidden = false;
-        console.log('📱 User RETURNED to radio page - optimizing audio');
+        console.log('📱 User RETURNED - optimizing for foreground');
         
         if (window.backgroundAudioActive) {
           stopBackgroundAudioMode();
@@ -1142,25 +1149,46 @@
       }
     });
     
-    // Also handle focus/blur events for better compatibility
+    // IMMEDIATELY handle focus/blur events for better compatibility
     window.addEventListener('blur', function() {
       if (isPlaying && isStreaming && !window.backgroundAudioActive) {
-        console.log('🔄 Window lost focus - enabling background audio');
+        console.log('🔄 Window lost focus - INSTANT background protection');
         startBackgroundAudioMode();
+        
+        // Force audio context resume
+        if (audioContext && audioContext.state !== 'running') {
+          audioContext.resume().catch(e => console.log('Blur resume failed:', e));
+        }
       }
     });
     
     window.addEventListener('focus', function() {
       if (window.backgroundAudioActive) {
-        console.log('🔄 Window gained focus - optimizing for foreground');
+        console.log('🔄 Window gained focus - returning to foreground');
         stopBackgroundAudioMode();
         resumeForegroundAudio();
       }
     });
     
-    // Start background audio mode with aggressive continuation
+    // Add page freeze/unfreeze handling for mobile
+    document.addEventListener('freeze', function() {
+      console.log('📱 Page frozen - maintaining audio');
+      if (isPlaying && isStreaming) {
+        startBackgroundAudioMode();
+      }
+    });
+    
+    document.addEventListener('resume', function() {
+      console.log('📱 Page resumed from freeze');
+      if (window.backgroundAudioActive) {
+        stopBackgroundAudioMode();
+        resumeForegroundAudio();
+      }
+    });
+    
+    // Start ultra-aggressive background audio mode to prevent tab switching breaks
     async function startBackgroundAudioMode() {
-      console.log('🔄 Starting AGGRESSIVE background audio mode...');
+      console.log('🔄 Starting ULTRA-AGGRESSIVE background audio mode...');
       window.backgroundAudioActive = true;
       
       // Request wake lock to prevent audio interruption
@@ -1173,48 +1201,64 @@
         console.log('⚠️ Wake lock not available:', error.message);
       }
       
-      // VERY aggressive keep-alive interval to maintain audio context
+      // ULTRA aggressive keep-alive interval to prevent ANY audio breaking
       window.backgroundKeepAlive = setInterval(() => {
         if (isPlaying && audioContext) {
-          if (audioContext.state === 'suspended') {
-            console.log('🔄 Resuming suspended audio context in background');
+          // Always ensure audio context is running
+          if (audioContext.state !== 'running') {
+            console.log('🔄 Force resuming audio context in background');
             audioContext.resume().catch(e => console.log('Resume failed:', e));
           }
           
-          // Force audio scheduling to continue even in background
+          // Force continuous audio scheduling in background with zero tolerance
           if (audioQueue.length > 0) {
             const currentTime = audioContext.currentTime;
-            if (nextNoteTime < currentTime - 0.1) {
-              console.log('🔄 Background audio timing correction');
-              nextNoteTime = currentTime + 0.02;
+            
+            // Don't let timing drift AT ALL in background
+            if (nextNoteTime < currentTime + 0.05) {
+              nextNoteTime = currentTime + 0.05;
+              console.log('🔄 Background audio timing force correction');
             }
             
-            // Force schedule audio even in background
+            // Force aggressive scheduling to prevent gaps
             let scheduled = 0;
-            while (nextNoteTime < currentTime + 0.1 && audioQueue.length > 0 && scheduled < 2) {
+            while (nextNoteTime < currentTime + 0.2 && audioQueue.length > 0 && scheduled < 8) {
               playAudioAtTime(nextNoteTime);
               scheduled++;
             }
+            
+            if (scheduled > 0) {
+              console.log(`🎵 Background force scheduled ${scheduled} chunks`);
+            }
           }
           
-          // Create dummy audio to keep context alive
+          // Create continuous dummy audio to absolutely prevent context suspension
           try {
             const dummyBuffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
             const dummySource = audioContext.createBufferSource();
+            const dummyGain = audioContext.createGain();
+            
             dummySource.buffer = dummyBuffer;
-            dummySource.connect(audioContext.destination);
+            dummyGain.gain.value = 0.0001; // Almost silent but keeps context alive
+            
+            dummySource.connect(dummyGain);
+            dummyGain.connect(audioContext.destination);
             dummySource.start();
+            
+            console.log('🔄 Dummy audio created to prevent suspension');
           } catch (e) {
-            // Ignore errors for dummy audio
+            // Continue even if dummy audio fails
           }
         }
         
-        // Log background audio status
-        console.log(`🎵 Background: queue=${audioQueue.length}, playing=${isPlaying}, context=${audioContext?.state}`);
+        // Force audio data processing even in background
+        if (audioQueue.length < 5 && isStreaming) {
+          console.log('⚠️ Background audio queue low - requesting more data');
+        }
         
-      }, 200); // Check every 200ms for VERY aggressive background support
+      }, 50); // Check every 50ms for ULTRA aggressive background support
       
-      updateStatus('🎧 Background audio active - radio continues in background!', 'success');
+      updateStatus('🎧 ULTRA Background Mode - Zero breaking tolerance!', 'success');
       backgroundStatus.style.display = 'block';
     }
     
