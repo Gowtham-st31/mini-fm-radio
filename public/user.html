@@ -273,6 +273,11 @@
     window.severeBreakCount = 0;
     window.lastGoodAudioTime = 0;
     
+    // Admin page visibility detection
+    window.adminPageLeft = false;
+    window.lastChunkReceived = 0;
+    window.noChunksTimeout = null;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const connectBtn = document.getElementById('connectBtn');
@@ -458,6 +463,27 @@
         window.noAudioTimeout = null;
       }
       
+      // Clear any "no chunks" timeout since we just received a chunk
+      if (window.noChunksTimeout) {
+        clearTimeout(window.noChunksTimeout);
+        window.noChunksTimeout = null;
+      }
+      
+      // Track when we last received a chunk for admin page detection
+      window.lastChunkReceived = currentTime;
+      
+      // Set timeout to detect if admin left the page (no chunks for 3+ seconds)
+      window.noChunksTimeout = setTimeout(() => {
+        if (!window.adminPageLeft && isStreaming) {
+          window.adminPageLeft = true;
+          console.log('📱 Admin appears to have LEFT the page (3+ sec no chunks)');
+          updateStatus('📱 Admin left page - audio paused...', 'streaming');
+          
+          // Don't clear audio immediately - wait for admin to return
+          // Just mark the state for better handling
+        }
+      }, 3000);
+      
       // Admin stop/start detection - if no audio for 2+ seconds, consider admin stopped
       window.lastChunkTime = currentTime;
       window.noAudioTimeout = setTimeout(() => {
@@ -473,6 +499,33 @@
           }
         }
       }, 2000);
+      
+      // Detect admin return to page after leaving (fresh chunks after long absence)
+      if (window.adminPageLeft) {
+        window.adminPageLeft = false;
+        console.log('📱 Admin RETURNED to page - doing PAGE RETURN RESET');
+        
+        // Page return reset - similar to restart but gentler
+        audioQueue = audioQueue.slice(-2); // Keep only 2 most recent chunks
+        
+        // Reset timing and detection systems
+        window.lastAudioTime = currentTime;
+        window.lastGoodAudioTime = currentTime;
+        window.audioBreakDetected = false;
+        window.consecutiveGoodChunks = 0;
+        window.adminPaused = false;
+        window.pauseStartTime = 0;
+        window.silenceCount = 0;
+        window.audioCount = 0;
+        window.severeBreakCount = 0; // Reset severe break counter
+        
+        if (audioContext && isPlaying) {
+          nextNoteTime = audioContext.currentTime + 0.03; // Quick sync
+        }
+        
+        updateStatus('📱 Admin returned - syncing audio...', 'success');
+        console.log('📱 PAGE RETURN RESET: Audio synced for admin return');
+      }
       
       // Detect admin restart after stop (fresh audio after long silence)
       if (window.adminStopped) {
@@ -771,15 +824,22 @@
         const currentTime = Date.now();
         const timeSinceLastAudio = currentTime - window.lastGoodAudioTime;
         const timeSinceLastChunk = currentTime - window.lastChunkTime;
+        const timeSinceChunkReceived = currentTime - window.lastChunkReceived;
         
         // Detect various types of breaks and fix them proactively
-        if (timeSinceLastAudio > 500 && audioQueue.length < 2) {
+        if (timeSinceLastAudio > 500 && audioQueue.length < 2 && !window.adminPageLeft) {
           console.log('🔧 AUTO-RECOVERY: Audio starving detected - forcing reset');
           forceAudioReset('Audio starvation detected');
           
-        } else if (timeSinceLastChunk > 1000) {
+        } else if (timeSinceLastChunk > 1000 && !window.adminPageLeft) {
           console.log('🔧 AUTO-RECOVERY: No chunks for 1+ sec - forcing reset');
           forceAudioReset('Chunk starvation detected');
+          
+        } else if (timeSinceChunkReceived > 5000 && !window.adminPageLeft) {
+          // Admin might have left page but timeout didn't trigger yet
+          console.log('🔧 AUTO-RECOVERY: Admin likely left page - gentle reset');
+          window.adminPageLeft = true;
+          updateStatus('📱 Admin left page - waiting for return...', 'streaming');
           
         } else if (audioQueue.length > 10) {
           console.log('🔧 AUTO-RECOVERY: Queue overflow - HD optimization');
@@ -788,7 +848,7 @@
             nextNoteTime = audioContext.currentTime + 0.02; // Faster restart for HD
           }
           
-        } else if (nextNoteTime < audioContext.currentTime - 0.3) {
+        } else if (nextNoteTime < audioContext.currentTime - 0.3 && !window.adminPageLeft) {
           console.log('🔧 AUTO-RECOVERY: Severe timing drift - forcing reset');
           forceAudioReset('Severe timing drift');
           window.severeBreakCount++;
@@ -888,12 +948,14 @@
           // Reset all detection systems including auto-recovery
           window.adminPaused = false;
           window.adminStopped = false;
+          window.adminPageLeft = false;
           window.pauseStartTime = 0;
           window.silenceCount = 0;
           window.audioCount = 0;
           window.lastAudioTime = Date.now();
           window.lastChunkTime = Date.now();
           window.lastGoodAudioTime = Date.now();
+          window.lastChunkReceived = Date.now();
           window.audioBreakDetected = false;
           window.consecutiveGoodChunks = 0;
           window.severeBreakCount = 0;
@@ -902,6 +964,11 @@
           if (window.noAudioTimeout) {
             clearTimeout(window.noAudioTimeout);
             window.noAudioTimeout = null;
+          }
+          
+          if (window.noChunksTimeout) {
+            clearTimeout(window.noChunksTimeout);
+            window.noChunksTimeout = null;
           }
           
           // Start monitoring system
@@ -959,11 +1026,13 @@
       // Reset all detection systems
       window.adminPaused = false;
       window.adminStopped = false;
+      window.adminPageLeft = false;
       window.pauseStartTime = 0;
       window.silenceCount = 0;
       window.audioCount = 0;
       window.lastAudioTime = 0;
       window.lastChunkTime = 0;
+      window.lastChunkReceived = 0;
       window.audioBreakDetected = false;
       window.consecutiveGoodChunks = 0;
       window.severeBreakCount = 0;
@@ -973,6 +1042,11 @@
       if (window.noAudioTimeout) {
         clearTimeout(window.noAudioTimeout);
         window.noAudioTimeout = null;
+      }
+      
+      if (window.noChunksTimeout) {
+        clearTimeout(window.noChunksTimeout);
+        window.noChunksTimeout = null;
       }
       
       if (window.autoRecoveryInterval) {
