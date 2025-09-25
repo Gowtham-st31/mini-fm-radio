@@ -186,6 +186,10 @@
       🎧 Ready for live radio
     </div>
     
+    <div class="status" id="backgroundStatus" style="display: none; background: rgba(76, 175, 80, 0.3); color: #4CAF50; font-size: 1rem; padding: 15px;">
+      🎵 Background Audio Active - Radio continues playing when you switch tabs!
+    </div>
+    
     <div>
       <button class="btn" id="connectBtn" onclick="startRadio()">
         🎵 Connect to Radio
@@ -279,8 +283,15 @@
     window.lastChunkReceived = 0;
     window.noChunksTimeout = null;
     
+    // User page visibility detection for background audio
+    window.userPageHidden = false;
+    window.backgroundKeepAlive = null;
+    window.wakeLock = null;
+    window.backgroundAudioActive = false;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
+    const backgroundStatus = document.getElementById('backgroundStatus');
     const connectBtn = document.getElementById('connectBtn');
     const stopBtn = document.getElementById('stopBtn');
     const audioSection = document.getElementById('audioSection');
@@ -929,6 +940,12 @@
           // Stop playing
           isPlaying = false;
           playBtn.textContent = '▶️';
+          
+          // Stop background audio mode if active
+          if (window.backgroundAudioActive) {
+            stopBackgroundAudioMode();
+          }
+          
           updateStatus('⏸️ Audio paused', 'success');
           
         } else {
@@ -976,7 +993,13 @@
           startAutoRecoveryMonitor();
           
           playBtn.textContent = '⏸️';
-          updateStatus('🎵 Playing HD audio with auto-recovery!', 'success');
+          
+          // If user is on a different tab, immediately start background mode
+          if (document.hidden) {
+            startBackgroundAudioMode();
+          } else {
+            updateStatus('🎵 Playing HD audio with auto-recovery!', 'success');
+          }
           
           console.log('🎧 HD Audio playback started with break detection enabled');
           
@@ -1089,7 +1112,122 @@
     window.addEventListener('beforeunload', () => {
       if (websocket) websocket.close();
       if (audioContext) audioContext.close();
+      if (window.wakeLock) window.wakeLock.release();
+      if (window.backgroundKeepAlive) clearInterval(window.backgroundKeepAlive);
     });
+    
+    // Handle page visibility changes for background audio
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden) {
+        // User switched to another tab/window
+        window.userPageHidden = true;
+        console.log('📱 User switched AWAY from radio page - enabling background audio');
+        
+        if (isPlaying && isStreaming) {
+          startBackgroundAudioMode();
+        }
+        
+      } else {
+        // User returned to the radio tab
+        window.userPageHidden = false;
+        console.log('📱 User RETURNED to radio page - optimizing audio');
+        
+        if (window.backgroundAudioActive) {
+          stopBackgroundAudioMode();
+          resumeForegroundAudio();
+        }
+      }
+    });
+    
+    // Start background audio mode with aggressive continuation
+    async function startBackgroundAudioMode() {
+      console.log('🔄 Starting AGGRESSIVE background audio mode...');
+      window.backgroundAudioActive = true;
+      
+      // Request wake lock to prevent audio interruption
+      try {
+        if ('wakeLock' in navigator) {
+          window.wakeLock = await navigator.wakeLock.request('screen');
+          console.log('🔒 Wake lock acquired for background audio');
+        }
+      } catch (error) {
+        console.log('⚠️ Wake lock not available:', error.message);
+      }
+      
+      // Aggressive keep-alive interval to maintain audio context
+      window.backgroundKeepAlive = setInterval(() => {
+        if (isPlaying && audioContext && audioContext.state === 'suspended') {
+          console.log('🔄 Resuming suspended audio context in background');
+          audioContext.resume().catch(e => console.log('Resume failed:', e));
+        }
+        
+        // Force audio scheduling to continue
+        if (isPlaying && audioQueue.length > 0) {
+          const currentTime = audioContext.currentTime;
+          if (nextNoteTime < currentTime - 0.1) {
+            console.log('🔄 Background audio timing correction');
+            nextNoteTime = currentTime + 0.05;
+          }
+        }
+        
+        // Log background audio status
+        console.log(`🎵 Background audio: queue=${audioQueue.length}, playing=${isPlaying}, context=${audioContext?.state}`);
+        
+      }, 500); // Check every 500ms for aggressive background support
+      
+      updateStatus('🎧 Background audio active - radio playing in background', 'success');
+      backgroundStatus.style.display = 'block';
+    }
+    
+    // Stop background audio mode
+    function stopBackgroundAudioMode() {
+      console.log('⏹️ Stopping background audio mode...');
+      window.backgroundAudioActive = false;
+      
+      // Release wake lock
+      if (window.wakeLock) {
+        window.wakeLock.release();
+        window.wakeLock = null;
+        console.log('🔓 Wake lock released');
+      }
+      
+      // Stop keep-alive interval
+      if (window.backgroundKeepAlive) {
+        clearInterval(window.backgroundKeepAlive);
+        window.backgroundKeepAlive = null;
+      }
+      
+      backgroundStatus.style.display = 'none';
+    }
+    
+    // Resume foreground audio with optimization
+    async function resumeForegroundAudio() {
+      console.log('🔄 Resuming foreground audio...');
+      
+      // Ensure audio context is running
+      if (audioContext && audioContext.state !== 'running') {
+        try {
+          await audioContext.resume();
+          console.log('✅ Audio context resumed for foreground');
+        } catch (error) {
+          console.error('❌ Failed to resume audio context:', error);
+        }
+      }
+      
+      // Optimize audio queue for smooth resumption
+      if (audioQueue.length > 8) {
+        console.log('🗑️ Optimizing audio queue for foreground return');
+        audioQueue = audioQueue.slice(-4); // Keep only recent audio for smooth resumption
+      }
+      
+      // Reset timing for immediate audio
+      if (isPlaying && audioContext) {
+        nextNoteTime = audioContext.currentTime + 0.02;
+        console.log('⏰ Audio timing reset for foreground return');
+      }
+      
+      updateStatus('🔴 LIVE - Resumed foreground audio!', 'success');
+    }
 
     // Initialize
     window.addEventListener('load', () => {
