@@ -1,3 +1,7 @@
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -286,6 +290,12 @@
     window.wakeLock = null;
     window.backgroundAudioActive = false;
     
+    // WebSocket connection stability
+    window.connectionHeartbeat = null;
+    window.reconnectAttempts = 0;
+    window.maxReconnectAttempts = 5;
+    window.reconnectDelay = 2000;
+    
     // DOM elements
     const statusDisplay = document.getElementById('statusDisplay');
     const backgroundStatus = document.getElementById('backgroundStatus');
@@ -348,43 +358,21 @@
         
         await audioContext.resume();
         
-        // Create gain node for volume control with ultra-clean processing
+        // Create gain node for volume control with balanced processing
         gainNode = audioContext.createGain();
         
-        // Add professional noise gate to eliminate background noise and artifacts
-        const noiseGate = audioContext.createDynamicsCompressor();
-        noiseGate.threshold.setValueAtTime(-40, audioContext.currentTime); // Noise gate threshold
-        noiseGate.knee.setValueAtTime(0, audioContext.currentTime); // Hard knee for clean gating
-        noiseGate.ratio.setValueAtTime(20, audioContext.currentTime); // Strong suppression below threshold
-        noiseGate.attack.setValueAtTime(0.001, audioContext.currentTime); // Very fast attack
-        noiseGate.release.setValueAtTime(0.1, audioContext.currentTime); // Medium release
+        // Add gentle noise reduction without aggressive gating (which causes artifacts)
+        const gentleCompressor = audioContext.createDynamicsCompressor();
+        gentleCompressor.threshold.setValueAtTime(-30, audioContext.currentTime); // Moderate threshold
+        gentleCompressor.knee.setValueAtTime(12, audioContext.currentTime); // Soft knee for natural sound
+        gentleCompressor.ratio.setValueAtTime(3, audioContext.currentTime); // Gentle compression
+        gentleCompressor.attack.setValueAtTime(0.01, audioContext.currentTime); // Natural attack
+        gentleCompressor.release.setValueAtTime(0.2, audioContext.currentTime); // Natural release
         
-        // Create cleaner EQ with reduced gain to prevent artifacts
-        const lowShelf = audioContext.createBiquadFilter();
-        lowShelf.type = 'lowshelf';
-        lowShelf.frequency.setValueAtTime(320, audioContext.currentTime);
-        lowShelf.gain.setValueAtTime(1, audioContext.currentTime); // Reduced from 2 to 1
-        
-        const highShelf = audioContext.createBiquadFilter();
-        highShelf.type = 'highshelf';
-        highShelf.frequency.setValueAtTime(3200, audioContext.currentTime);
-        highShelf.gain.setValueAtTime(0.5, audioContext.currentTime); // Reduced from 1 to 0.5
-        
-        // Gentler compressor to avoid introducing artifacts
-        const compressor = audioContext.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-18, audioContext.currentTime); // Higher threshold
-        compressor.knee.setValueAtTime(20, audioContext.currentTime);
-        compressor.ratio.setValueAtTime(6, audioContext.currentTime); // Lower ratio
-        compressor.attack.setValueAtTime(0.005, audioContext.currentTime); // Slower attack
-        compressor.release.setValueAtTime(0.15, audioContext.currentTime); // Faster release
-        
-        // Connect the ultra-clean audio chain: gainNode -> noise gate -> EQ -> gentle compressor -> destination
-        gainNode.connect(noiseGate);
-        noiseGate.connect(lowShelf);
-        lowShelf.connect(highShelf);
-        highShelf.connect(compressor);
-        compressor.connect(audioContext.destination);
-        gainNode.gain.value = 0.75; // Slightly lower to prevent any overdriving
+        // Connect clean audio chain: gainNode -> gentle compressor -> destination
+        gainNode.connect(gentleCompressor);
+        gentleCompressor.connect(audioContext.destination);
+        gainNode.gain.value = 0.8; // Balanced gain level
         
         updateStatus('🌐 Connecting to radio server...', 'streaming');
         
@@ -434,19 +422,46 @@
           websocket.onopen = () => {
             console.log('✅ WebSocket connected');
             connectionStat.textContent = '✅';
+            window.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+            startConnectionHeartbeat(); // Start heartbeat to maintain connection
             resolve();
           };
           
           websocket.onmessage = async (event) => {
             if (isStreaming) {
-              await handlePCMData(event.data);
+              // Handle heartbeat pong responses
+              if (typeof event.data === 'string' && event.data === 'pong') {
+                console.log('💗 Received heartbeat pong');
+                return;
+              }
+              
+              // Handle binary PCM data
+              if (event.data instanceof ArrayBuffer) {
+                await handlePCMData(event.data);
+              }
             }
           };
           
-          websocket.onclose = () => {
-            console.log('❌ WebSocket disconnected');
-            updateStatus('❌ Connection lost', 'error');
-            connectionStat.textContent = '❌';
+          websocket.onclose = (event) => {
+            console.log('❌ WebSocket disconnected:', event.code, event.reason);
+            stopConnectionHeartbeat();
+            
+            // Only attempt reconnection if we were streaming and it wasn't a manual disconnect
+            if (isStreaming && event.code !== 1000 && window.reconnectAttempts < window.maxReconnectAttempts) {
+              console.log(`🔄 Attempting reconnection ${window.reconnectAttempts + 1}/${window.maxReconnectAttempts}`);
+              updateStatus(`🔄 Reconnecting... (${window.reconnectAttempts + 1}/${window.maxReconnectAttempts})`, 'streaming');
+              
+              setTimeout(() => {
+                window.reconnectAttempts++;
+                reconnectWebSocket();
+              }, window.reconnectDelay);
+              
+              // Increase delay for next attempt (exponential backoff)
+              window.reconnectDelay = Math.min(window.reconnectDelay * 1.5, 10000);
+            } else {
+              updateStatus('❌ Connection lost', 'error');
+              connectionStat.textContent = '❌';
+            }
           };
           
           websocket.onerror = (error) => {
@@ -461,6 +476,48 @@
           reject(error);
         }
       });
+    }
+
+    // Start connection heartbeat to prevent disconnections
+    function startConnectionHeartbeat() {
+      stopConnectionHeartbeat(); // Clear any existing heartbeat
+      
+      window.connectionHeartbeat = setInterval(() => {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+          // Send a ping to keep connection alive
+          try {
+            websocket.send('ping');
+          } catch (error) {
+            console.log('⚠️ Heartbeat failed:', error);
+            stopConnectionHeartbeat();
+          }
+        } else {
+          stopConnectionHeartbeat();
+        }
+      }, 30000); // Send heartbeat every 30 seconds
+    }
+    
+    // Stop connection heartbeat
+    function stopConnectionHeartbeat() {
+      if (window.connectionHeartbeat) {
+        clearInterval(window.connectionHeartbeat);
+        window.connectionHeartbeat = null;
+      }
+    }
+    
+    // Reconnect WebSocket
+    async function reconnectWebSocket() {
+      try {
+        if (websocket) {
+          websocket.close();
+        }
+        await connectWebSocket();
+        console.log('✅ WebSocket reconnected successfully');
+        updateStatus('✅ Reconnected to server!', 'success');
+      } catch (error) {
+        console.error('❌ Reconnection failed:', error);
+        // The onclose handler will trigger another reconnect attempt if needed
+      }
     }
 
     // Handle incoming PCM data with automatic break detection
@@ -620,25 +677,25 @@
       const pcmData = new Int16Array(arrayBuffer);
       const floatData = new Float32Array(pcmData.length);
       
-      // Ultra-clean int16 to float32 conversion with noise elimination
+      // Clean int16 to float32 conversion with minimal processing
       let maxAmplitude = 0;
       for (let i = 0; i < pcmData.length; i++) {
-        // Pure conversion without dithering to eliminate noise sources
+        // Simple, clean conversion without over-processing
         let sample = pcmData[i] / 32768.0;
         
-        // Apply noise floor to eliminate very quiet artifacts (much stricter)
-        if (Math.abs(sample) < 0.00005) sample = 0;
+        // Only eliminate truly silent samples (much more conservative)
+        if (Math.abs(sample) < 0.000001) sample = 0;
         
-        // Gentler soft limiting to prevent artifacts
-        if (sample > 0.98) sample = 0.98 + (sample - 0.98) * 0.05;
-        if (sample < -0.98) sample = -0.98 + (sample + 0.98) * 0.05;
+        // Gentle limiting only for extreme values
+        if (sample > 0.995) sample = 0.995;
+        if (sample < -0.995) sample = -0.995;
         
         floatData[i] = sample;
         maxAmplitude = Math.max(maxAmplitude, Math.abs(sample));
       }
       
-      // More precise admin pause/resume detection to prevent false noise triggers
-      if (maxAmplitude < 0.00001) { // Ultra-low threshold for true silence detection
+      // Balanced admin pause/resume detection
+      if (maxAmplitude < 0.001) { // Reasonable threshold for silence detection
         window.silenceCount++;
         window.audioCount = 0; // Reset audio counter
         
@@ -772,7 +829,7 @@
       // Continue scheduling with consistent timing
       if (isPlaying) {
         // Use setTimeout for more consistent scheduling
-        setTimeout(scheduleAudio, 15); // 15ms intervals for ultra-smooth scheduling
+        setTimeout(scheduleAudio, 25); // More reasonable 25ms intervals for smooth but not aggressive scheduling
       }
     }
 
@@ -787,29 +844,22 @@
         const audioBuffer = audioContext.createBuffer(1, audioData.length, sampleRate);
         const channelData = audioBuffer.getChannelData(0);
         
-        // Apply ultra-smooth windowing to completely eliminate any clicks/pops
-        const windowSize = Math.min(256, audioData.length / 4); // Even larger window for ultra-smooth transitions
+        // Apply gentle windowing to prevent clicks without introducing artifacts
+        const windowSize = Math.min(32, audioData.length / 8); // Much smaller window for minimal processing
         const windowedData = new Float32Array(audioData.length);
         
         for (let i = 0; i < audioData.length; i++) {
           let sample = audioData[i];
           
-          // Apply smoother Tukey window (cosine-tapered) at edges for perfect transitions
+          // Apply very gentle cosine windowing only at the very edges
           if (i < windowSize) {
-            // Smoother fade-in using cosine taper
-            const alpha = 0.25; // Gentler taper
-            const windowVal = 0.5 * (1 + Math.cos(Math.PI * (2 * i / windowSize - 1))) * alpha + (1 - alpha);
-            sample *= windowVal;
+            // Gentle cosine fade-in
+            const fadeVal = 0.5 * (1 - Math.cos(Math.PI * i / windowSize));
+            sample *= fadeVal;
           } else if (i >= audioData.length - windowSize) {
-            // Smoother fade-out using cosine taper
-            const alpha = 0.25; // Gentler taper
-            const windowVal = 0.5 * (1 + Math.cos(Math.PI * (2 * (audioData.length - i) / windowSize - 1))) * alpha + (1 - alpha);
-            sample *= windowVal;
-          }
-          
-          // Additional DC removal to prevent low-frequency noise
-          if (i > 0) {
-            sample = sample - (sample + windowedData[i-1]) * 0.001; // Gentle DC blocking
+            // Gentle cosine fade-out
+            const fadeVal = 0.5 * (1 - Math.cos(Math.PI * (audioData.length - i) / windowSize));
+            sample *= fadeVal;
           }
           
           windowedData[i] = sample;
@@ -831,9 +881,9 @@
         
         source.start(time);
         
-        // Update next time with perfect overlap calculation to prevent any gaps or artifacts
+        // Update next time with minimal overlap to prevent gaps without causing artifacts
         const bufferDuration = audioBuffer.duration;
-        nextNoteTime = time + bufferDuration - 0.001; // Minimal overlap to prevent gaps without causing artifacts
+        nextNoteTime = time + bufferDuration - 0.0005; // Minimal overlap to prevent gaps
         
         console.log(`🎵 HD Audio scheduled at ${time.toFixed(4)}s, next: ${nextNoteTime.toFixed(4)}s, queue: ${audioQueue.length}`);
         
@@ -1056,15 +1106,25 @@
         audioContext = null;
       }
       
-      // Close WebSocket
+      // Close WebSocket and stop heartbeat
       if (websocket) {
         websocket.close();
+      }
+      stopConnectionHeartbeat();
+      
+      // Stop background audio mode if active
+      if (window.backgroundAudioActive) {
+        stopBackgroundAudioMode();
       }
       
       // Reset variables
       gainNode = null;
       chunkCount = 0;
       totalBytes = 0;
+      
+      // Reset connection variables
+      window.reconnectAttempts = 0;
+      window.reconnectDelay = 2000;
       
       // Reset all detection systems
       window.adminPaused = false;
@@ -1133,6 +1193,7 @@
       if (audioContext) audioContext.close();
       if (window.wakeLock) window.wakeLock.release();
       if (window.backgroundKeepAlive) clearInterval(window.backgroundKeepAlive);
+      stopConnectionHeartbeat();
     });
     
     // Handle page visibility changes with ultra-aggressive background audio
@@ -1219,7 +1280,7 @@
       // ULTRA aggressive keep-alive interval to prevent ANY audio breaking
       window.backgroundKeepAlive = setInterval(() => {
         if (isPlaying && audioContext) {
-          // Always ensure audio context is running
+          // Always ensure audio context is running - but more gently
           if (audioContext.state !== 'running') {
             console.log('🔄 Force resuming audio context in background');
             audioContext.resume().catch(e => console.log('Resume failed:', e));
@@ -1247,21 +1308,8 @@
             }
           }
           
-          // Create ultra-quiet dummy audio to prevent context suspension without adding noise
-          try {
-            const dummyBuffer = audioContext.createBuffer(1, 32, audioContext.sampleRate); // Smaller buffer
-            const dummySource = audioContext.createBufferSource();
-            const dummyGain = audioContext.createGain();
-            
-            dummySource.buffer = dummyBuffer;
-            dummyGain.gain.value = 0.00001; // Ultra-quiet to prevent any audible artifacts
-            
-            dummySource.connect(dummyGain);
-            dummyGain.connect(audioContext.destination);
-            dummySource.start();
-          } catch (e) {
-            // Continue even if dummy audio fails - better to avoid potential noise
-          }
+          // Don't create dummy audio - it can cause noise
+          // Instead, just ensure scheduling continues aggressively
         }
         
         // Force audio data processing even in background
@@ -1269,7 +1317,7 @@
           console.log('⚠️ Background audio queue low - requesting more data');
         }
         
-      }, 50); // Check every 50ms for ULTRA aggressive background support
+      }, 200); // Much gentler background checks - every 200ms instead of 50ms
       
       updateStatus('🎧 ULTRA Background Mode - Zero breaking tolerance!', 'success');
       backgroundStatus.style.display = 'block';
@@ -1356,4 +1404,3 @@
   </script>
 </body>
 </html>
-
