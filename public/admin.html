@@ -1,140 +1,491 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📡 Mini FM Radio - Admin</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    background: linear-gradient(to right, #ff7e5f, #feb47b);
-    color: white;
-    text-align: center;
-    padding: 30px;
-  }
-  .container {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 25px;
-    border-radius: 15px;
-    max-width: 400px;
-    margin: auto;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
-  }
-  button {
-    padding: 12px 25px;
-    margin: 10px;
-    font-size: 16px;
-    border: none;
-    border-radius: 25px;
-    background: #ff4081;
-    color: white;
-    cursor: pointer;
-    transition: 0.3s;
-  }
-  button:hover {
-    background: #e91e63;
-  }
-  #status {
-    margin-top: 15px;
-    font-size: 14px;
-    padding: 10px;
-    border-radius: 8px;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Screen Audio Broadcast</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      text-align: center;
+      padding: 20px;
+      margin: 0;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 40px;
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+    }
+    
+    h1 {
+      color: #ff6b35;
+      margin-bottom: 30px;
+      font-size: 2.5rem;
+    }
+    
+    .mode-selection {
+      background: rgba(0, 0, 0, 0.2);
+      padding: 25px;
+      border-radius: 15px;
+      margin: 25px 0;
+    }
+    
+    .mode-option {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      margin: 15px 0;
+      border-radius: 12px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    
+    .mode-option:hover {
+      border-color: #ff6b35;
+      background: rgba(255, 107, 53, 0.2);
+    }
+    
+    .mode-option.selected {
+      border-color: #2ecc71;
+      background: rgba(46, 204, 113, 0.2);
+    }
+    
+    .mode-title {
+      font-size: 1.3rem;
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #ff6b35;
+    }
+    
+    .mode-desc {
+      font-size: 1rem;
+      opacity: 0.9;
+    }
+    
+    .status {
+      padding: 20px;
+      margin: 20px 0;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 15px;
+      font-size: 1.2rem;
+    }
+    
+    .btn {
+      background: linear-gradient(45deg, #ff6b35, #f7931e);
+      color: white;
+      border: none;
+      padding: 18px 35px;
+      font-size: 1.2rem;
+      border-radius: 30px;
+      cursor: pointer;
+      margin: 15px;
+      min-width: 200px;
+      font-weight: 600;
+    }
+    
+    .btn:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    
+    .btn.stop {
+      background: linear-gradient(45deg, #e74c3c, #c0392b);
+    }
+    
+    .success {
+      background: rgba(46, 204, 113, 0.3) !important;
+      color: #2ecc71 !important;
+    }
+    
+    .error {
+      background: rgba(231, 76, 60, 0.3) !important;
+      color: #e74c3c !important;
+    }
+    
+    .streaming {
+      background: rgba(52, 152, 219, 0.3) !important;
+      color: #3498db !important;
+    }
+    
+    .instructions {
+      background: rgba(46, 204, 113, 0.2);
+      color: #2ecc71;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 20px 0;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+    
+    .warning {
+      background: rgba(243, 156, 18, 0.2);
+      color: #f39c12;
+      padding: 15px;
+      border-radius: 10px;
+      margin: 15px 0;
+      font-size: 0.9rem;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
-    <h1>📡 Mini FM Radio - Admin</h1>
-    <button id="startBtn">▶️ Start Streaming</button>
-    <button id="stopBtn" style="display:none;">⏹️ Stop Streaming</button>
-    <p id="status">Waiting to start...</p>
+    <h1>🎙️ Admin - Screen Audio Broadcast</h1>
+    
+    <div class="mode-selection">
+      <h3>Choose Audio Source:</h3>
+      
+      <div class="mode-option" onclick="selectMode('microphone')" id="micMode">
+        <div class="mode-title">🎤 Microphone Only</div>
+        <div class="mode-desc">Broadcast your voice through microphone</div>
+      </div>
+      
+      <div class="mode-option selected" onclick="selectMode('screen')" id="screenMode">
+        <div class="mode-title">🖥️ Screen Audio</div>
+        <div class="mode-desc">Broadcast audio from your screen (YouTube, Spotify, etc.)</div>
+      </div>
+      
+      <div class="mode-option" onclick="selectMode('mixed')" id="mixedMode">
+        <div class="mode-title">🎵 Mixed Audio</div>
+        <div class="mode-desc">Broadcast screen audio + microphone together</div>
+      </div>
+    </div>
+    
+    <div class="instructions" id="instructions">
+      <strong>🖥️ Screen Audio Mode:</strong><br>
+      • Click "Start Broadcasting" below<br>
+      • Browser will ask to share your screen<br>
+      • Choose "Share audio" or select a specific tab with audio<br>
+      • Perfect for streaming music from Spotify, YouTube, etc.
+    </div>
+    
+    <div class="warning">
+      ⚠️ <strong>Note:</strong> Screen audio capture requires a modern browser (Chrome 94+, Firefox 92+, Edge 94+)
+    </div>
+    
+    <div class="status" id="statusDisplay">
+      📡 Ready to broadcast screen audio
+    </div>
+    
+    <div>
+      <button class="btn" id="startBtn" onclick="startBroadcast()">
+        🚀 Start Broadcasting
+      </button>
+      <button class="btn stop" id="stopBtn" onclick="stopBroadcast()" style="display: none;">
+        🛑 Stop Broadcasting
+      </button>
+    </div>
   </div>
 
   <script>
-    let ws;
-    let audioContext;
-    let microphone;
-    let processor;
-    const sampleRate = 48000;
+    let websocket = null;
+    let audioContext = null;
+    let isRecording = false;
+    let processor = null;
+    let source = null;
+    let currentMode = 'screen';
+    
+    const statusDisplay = document.getElementById('statusDisplay');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const instructions = document.getElementById('instructions');
 
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
-    const status = document.getElementById("status");
-
-    function updateStatus(msg, type = "") {
-      status.textContent = msg;
-      status.className = type;
+    // Select broadcast mode
+    function selectMode(mode) {
+      currentMode = mode;
+      
+      // Update UI
+      document.querySelectorAll('.mode-option').forEach(el => el.classList.remove('selected'));
+      document.getElementById(mode + 'Mode').classList.add('selected');
+      
+      // Update instructions
+      updateInstructions(mode);
     }
 
-    function connectWebSocket() {
-      ws = new WebSocket("ws://localhost:8080"); // Change to your server
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => updateStatus("✅ WebSocket connected", "success");
-      ws.onclose = () => {
-        updateStatus("⚠️ Disconnected. Reconnecting in 3s...", "error");
-        setTimeout(connectWebSocket, 3000);
+    // Update instructions based on mode
+    function updateInstructions(mode) {
+      const instructionTexts = {
+        microphone: `
+          <strong>🎤 Microphone Mode:</strong><br>
+          • Click "Start Broadcasting" below<br>
+          • Allow microphone access<br>
+          • Speak into your microphone to broadcast
+        `,
+        screen: `
+          <strong>🖥️ Screen Audio Mode:</strong><br>
+          • Click "Start Broadcasting" below<br>
+          • Browser will ask to share your screen<br>
+          • Choose "Share audio" or select a specific tab with audio<br>
+          • Perfect for streaming music from Spotify, YouTube, etc.
+        `,
+        mixed: `
+          <strong>🎵 Mixed Audio Mode:</strong><br>
+          • Click "Start Broadcasting" below<br>
+          • Allow both microphone and screen audio access<br>
+          • Your voice + screen audio will be mixed together<br>
+          • Great for DJ-style broadcasting with commentary
+        `
       };
-      ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
-        updateStatus("❌ Connection error", "error");
-      };
+      
+      instructions.innerHTML = instructionTexts[mode];
     }
 
-    async function startStreaming() {
-      updateStatus("🎙️ Starting streaming...", "streaming");
-
-      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      microphone = audioContext.createMediaStreamSource(stream);
-
-      processor = audioContext.createScriptProcessor(4096, 1, 1);
-      microphone.connect(processor);
-      processor.connect(audioContext.destination);
-
-      processor.onaudioprocess = (e) => {
-        const channelData = e.inputBuffer.getChannelData(0);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(channelData.buffer);
+    // Start broadcasting
+    async function startBroadcast() {
+      try {
+        updateStatus('🔄 Setting up audio capture...', 'streaming');
+        
+        let stream;
+        
+        if (currentMode === 'microphone') {
+          // Microphone only
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: 48000,
+              channelCount: 1
+            }
+          });
+          
+        } else if (currentMode === 'screen') {
+          // Screen audio only
+          updateStatus('🖥️ Please select screen/tab to share audio...', 'streaming');
+          
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: false,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: 48000,
+              channelCount: 2
+            }
+          });
+          
+        } else if (currentMode === 'mixed') {
+          // Mixed: microphone + screen audio
+          updateStatus('🎵 Setting up mixed audio (mic + screen)...', 'streaming');
+          
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: 48000
+            }
+          });
+          
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: false,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              sampleRate: 48000
+            }
+          });
+          
+          // Mix both streams using Web Audio API
+          audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: 48000
+          });
+          
+          await audioContext.resume();
+          
+          const micSource = audioContext.createMediaStreamSource(micStream);
+          const screenSource = audioContext.createMediaStreamSource(screenStream);
+          const destination = audioContext.createMediaStreamDestination();
+          
+          // Mix both sources
+          micSource.connect(destination);
+          screenSource.connect(destination);
+          
+          stream = destination.stream;
         }
-      };
-
-      startBtn.style.display = "none";
-      stopBtn.style.display = "inline-block";
-      updateStatus("📡 Streaming live audio...", "success");
+        
+        updateStatus('🌐 Connecting to server...', 'streaming');
+        
+        // Connect to WebSocket
+        await connectWebSocket();
+        
+        updateStatus('🎙️ Processing audio...', 'streaming');
+        
+        // Create audio context if not already created
+        if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)({
+            sampleRate: 48000
+          });
+          await audioContext.resume();
+        }
+        
+        // Create audio processing pipeline
+        source = audioContext.createMediaStreamSource(stream);
+        processor = audioContext.createScriptProcessor(4096, 2, 1); // Support stereo input
+        
+        processor.onaudioprocess = function(event) {
+          if (isRecording && websocket && websocket.readyState === WebSocket.OPEN) {
+            const inputBuffer = event.inputBuffer;
+            
+            // Mix stereo to mono if needed
+            let audioData;
+            if (inputBuffer.numberOfChannels === 2) {
+              const leftChannel = inputBuffer.getChannelData(0);
+              const rightChannel = inputBuffer.getChannelData(1);
+              audioData = new Float32Array(leftChannel.length);
+              
+              // Mix stereo to mono
+              for (let i = 0; i < leftChannel.length; i++) {
+                audioData[i] = (leftChannel[i] + rightChannel[i]) / 2;
+              }
+            } else {
+              audioData = inputBuffer.getChannelData(0);
+            }
+            
+            // Convert to PCM
+            const pcmBuffer = new ArrayBuffer(audioData.length * 2);
+            const pcmView = new DataView(pcmBuffer);
+            
+            for (let i = 0; i < audioData.length; i++) {
+              const sample = Math.max(-1, Math.min(1, audioData[i]));
+              const int16Sample = Math.round(sample * 32767);
+              pcmView.setInt16(i * 2, int16Sample, true);
+            }
+            
+            websocket.send(pcmBuffer);
+          }
+        };
+        
+        // Connect audio nodes
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        
+        // Start recording
+        isRecording = true;
+        
+        // Update UI
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        
+        const modeNames = {
+          microphone: 'microphone',
+          screen: 'screen audio',
+          mixed: 'mixed audio (mic + screen)'
+        };
+        
+        updateStatus(`🎵 Broadcasting ${modeNames[currentMode]}!`, 'success');
+        
+        console.log(`✅ ${currentMode} broadcasting started`);
+        
+      } catch (error) {
+        console.error('❌ Failed to start broadcast:', error);
+        
+        if (error.name === 'NotAllowedError') {
+          updateStatus('❌ Permission denied. Please allow access to microphone/screen.', 'error');
+        } else if (error.name === 'NotSupportedError') {
+          updateStatus('❌ Screen audio capture not supported in this browser.', 'error');
+        } else {
+          updateStatus('❌ Failed to start: ' + error.message, 'error');
+        }
+      }
     }
 
-    function stopStreaming() {
-      updateStatus("⏹️ Stopping streaming...", "error");
+    // Connect to WebSocket
+    function connectWebSocket() {
+      return new Promise((resolve, reject) => {
+        try {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = protocol + '//' + window.location.host;
+          
+          websocket = new WebSocket(wsUrl);
+          websocket.binaryType = 'arraybuffer';
+          
+          websocket.onopen = () => {
+            console.log('✅ WebSocket connected');
+            resolve();
+          };
+          
+          websocket.onclose = () => {
+            console.log('❌ WebSocket disconnected');
+            updateStatus('❌ Connection lost', 'error');
+            stopBroadcast();
+          };
+          
+          websocket.onerror = (error) => {
+            console.error('❌ WebSocket error:', error);
+            updateStatus('❌ Connection failed', 'error');
+            reject(new Error('WebSocket connection failed'));
+          };
+          
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
 
+    // Stop broadcasting
+    function stopBroadcast() {
+      isRecording = false;
+      
+      // Disconnect audio processing
       if (processor) {
         processor.disconnect();
         processor = null;
       }
-      if (microphone) {
-        microphone.disconnect();
-        microphone = null;
+      
+      if (source) {
+        source.disconnect();
+        source = null;
       }
+      
+      // Close audio context
       if (audioContext) {
         audioContext.close();
         audioContext = null;
       }
-
-      startBtn.style.display = "inline-block";
-      stopBtn.style.display = "none";
-      updateStatus("Stopped", "error");
+      
+      // Close WebSocket
+      if (websocket) {
+        websocket.close();
+        websocket = null;
+      }
+      
+      // Update UI
+      startBtn.style.display = 'inline-block';
+      stopBtn.style.display = 'none';
+      
+      updateStatus('📡 Broadcasting stopped');
+      
+      console.log('⏹️ Broadcasting stopped');
     }
 
-    startBtn.addEventListener("click", () => {
-      connectWebSocket();
-      setTimeout(startStreaming, 500); // Wait for WS connection
+    // Update status display
+    function updateStatus(message, type = '') {
+      statusDisplay.textContent = message;
+      statusDisplay.className = 'status';
+      if (type) {
+        statusDisplay.classList.add(type);
+      }
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      stopBroadcast();
     });
 
-    stopBtn.addEventListener("click", stopStreaming);
-
-    window.addEventListener("beforeunload", () => {
-      if (ws) ws.close();
-      stopStreaming();
+    // Initialize
+    window.addEventListener('load', () => {
+      console.log('🖥️ Screen Audio Admin Panel loaded');
+      updateInstructions('screen');
     });
   </script>
 </body>
